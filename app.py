@@ -96,49 +96,54 @@ def check_impersonation(domain):
         "instagram"
     ]
 
-    domain_name = domain.split(".")[0].lower()
+    # Remove port number and convert to lowercase
+    host = domain.lower().split(":")[0]
 
-    normalized_domain = domain_name.replace("1", "l")
-    normalized_domain = normalized_domain.replace("0", "o")
-    normalized_domain = normalized_domain.replace("3", "e")
-    normalized_domain = normalized_domain.replace("5", "s")
+    # Split domain into labels and ignore www
+    labels = [
+        part for part in host.split(".")
+        if part and part != "www"
+    ]
 
     best_match = None
     best_similarity = 0
+    impersonation_detected = False
 
-    for brand in known_brands:
+    for label in labels:
 
-        similarity = SequenceMatcher(
-            None,
-            normalized_domain,
-            brand
-        ).ratio()
+        # Normalize common character substitutions
+        normalized_label = label.replace("1", "l")
+        normalized_label = normalized_label.replace("0", "o")
+        normalized_label = normalized_label.replace("3", "e")
+        normalized_label = normalized_label.replace("5", "s")
 
-        if normalized_domain.startswith(brand):
+        for brand in known_brands:
 
-            similarity = max(
-                similarity,
-                0.90
-            )
+            similarity = SequenceMatcher(
+                None,
+                normalized_label,
+                brand
+            ).ratio()
 
-        if similarity > best_similarity:
+            # Strong indicator: normalized label matches the brand,
+            # but the original label is different.
+            if normalized_label == brand and label != brand:
+                similarity = 1.0
 
-            best_similarity = similarity
-            best_match = brand
+            # Brand written as a prefix
+            if normalized_label.startswith(brand) and label != brand:
+                similarity = max(similarity, 0.90)
 
-    if (
-        best_similarity >= 0.75
-        and normalized_domain != best_match
-    ):
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_match = brand
 
-        return (
-            True,
-            best_match,
-            round(best_similarity * 100)
-        )
+                # Do not flag the genuine brand domain
+                if label != brand and similarity >= 0.75:
+                    impersonation_detected = True
 
     return (
-        False,
+        impersonation_detected,
         best_match,
         round(best_similarity * 100)
     )
