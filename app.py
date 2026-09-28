@@ -21,7 +21,6 @@ model = joblib.load("phishguard_model.pkl")
 def create_database():
 
     connection = sqlite3.connect("phishguard.db")
-
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -58,7 +57,6 @@ def save_scan(
 ):
 
     connection = sqlite3.connect("phishguard.db")
-
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -81,7 +79,7 @@ def save_scan(
 
 
 # =========================================================
-# DOMAIN IMPERSONATION FUNCTION
+# DOMAIN IMPERSONATION DETECTION
 # =========================================================
 
 def check_impersonation(domain):
@@ -99,7 +97,7 @@ def check_impersonation(domain):
     # Remove port number and convert to lowercase
     host = domain.lower().split(":")[0]
 
-    # Split domain into labels and ignore www
+    # Split domain labels and ignore www
     labels = [
         part for part in host.split(".")
         if part and part != "www"
@@ -125,8 +123,8 @@ def check_impersonation(domain):
                 brand
             ).ratio()
 
-            # Strong indicator: normalized label matches the brand,
-            # but the original label is different.
+            # Strong indicator:
+            # paypa1 -> paypal
             if normalized_label == brand and label != brand:
                 similarity = 1.0
 
@@ -135,10 +133,11 @@ def check_impersonation(domain):
                 similarity = max(similarity, 0.90)
 
             if similarity > best_similarity:
+
                 best_similarity = similarity
                 best_match = brand
 
-                # Do not flag the genuine brand domain
+                # Do not flag genuine brand domains
                 if label != brand and similarity >= 0.75:
                     impersonation_detected = True
 
@@ -156,121 +155,499 @@ def check_impersonation(domain):
 st.set_page_config(
     page_title="PhishGuard",
     page_icon="🛡️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
+
+
 # =========================================================
-# COLORFUL UI STYLING
+# ATTRACTIVE CYBERSECURITY UI
 # =========================================================
 
 st.markdown("""
 <style>
 
-    /* Main background */
+    /* =========================================
+       MAIN BACKGROUND
+       ========================================= */
+
     .stApp {
-        background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 50%, #e0f2fe 100%);
+        background:
+            radial-gradient(
+                circle at 10% 10%,
+                rgba(99,102,241,0.18),
+                transparent 28%
+            ),
+            radial-gradient(
+                circle at 90% 20%,
+                rgba(168,85,247,0.16),
+                transparent 30%
+            ),
+            radial-gradient(
+                circle at 50% 100%,
+                rgba(14,165,233,0.12),
+                transparent 30%
+            ),
+            linear-gradient(
+                135deg,
+                #f8faff 0%,
+                #eef2ff 50%,
+                #f0f9ff 100%
+            );
     }
 
-    /* Main title */
+
+    /* =========================================
+       REMOVE EXTRA TOP SPACE
+       ========================================= */
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+
+
+    /* =========================================
+       HEADINGS
+       ========================================= */
+
     h1 {
-        color: #312e81;
-        font-weight: 800;
-        text-align: center;
+        text-align: center !important;
+        font-size: 3.2rem !important;
+        font-weight: 900 !important;
+        color: #312e81 !important;
+        letter-spacing: -1px;
     }
 
-    /* Subtitles and headings */
     h2 {
-        color: #1e3a8a;
+        color: #3730a3 !important;
+        font-weight: 800 !important;
     }
 
     h3 {
-        color: #3730a3;
+        color: #4338ca !important;
+        font-weight: 750 !important;
     }
 
-    /* Header description */
-    .stSubheader {
+
+    /* =========================================
+       SUBTITLE
+       ========================================= */
+
+    .subtitle {
         text-align: center;
+        font-size: 1.15rem;
+        color: #475569;
+        margin-top: -15px;
+        margin-bottom: 10px;
     }
 
-    /* Analyze button */
-    .stButton > button {
-        background: linear-gradient(90deg, #4f46e5, #7c3aed);
+
+    /* =========================================
+       HERO CARD
+       ========================================= */
+
+    .hero-card {
+        background:
+            linear-gradient(
+                135deg,
+                rgba(79,70,229,0.96),
+                rgba(124,58,237,0.96)
+            );
+
+        padding: 28px;
+        border-radius: 22px;
         color: white;
-        border: none;
-        border-radius: 12px;
-        padding: 0.7rem 1rem;
-        font-weight: 700;
-        font-size: 16px;
-        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        margin: 20px 0 25px 0;
+
+        box-shadow:
+            0 15px 35px rgba(79,70,229,0.25);
+
+        border: 1px solid rgba(255,255,255,0.25);
+    }
+
+    .hero-card h2 {
+        color: white !important;
+        margin-bottom: 8px;
+    }
+
+    .hero-card p {
+        color: #eef2ff;
+        font-size: 1rem;
+    }
+
+
+    /* =========================================
+       SCANNER CARD
+       ========================================= */
+
+    .scanner-card {
+        background: rgba(255,255,255,0.90);
+        border: 1px solid #c7d2fe;
+        border-radius: 20px;
+        padding: 24px;
+
+        box-shadow:
+            0 10px 30px rgba(30,41,59,0.08);
+
+        margin-bottom: 20px;
+    }
+
+
+    /* =========================================
+       RESULT CARDS
+       ========================================= */
+
+    .result-danger {
+        background: linear-gradient(
+            135deg,
+            #fff1f2,
+            #ffe4e6
+        );
+
+        border-left: 7px solid #ef4444;
+        border-radius: 16px;
+        padding: 20px;
+        margin: 10px 0;
+
+        box-shadow:
+            0 8px 20px rgba(239,68,68,0.12);
+    }
+
+    .result-safe {
+        background: linear-gradient(
+            135deg,
+            #f0fdf4,
+            #dcfce7
+        );
+
+        border-left: 7px solid #22c55e;
+        border-radius: 16px;
+        padding: 20px;
+        margin: 10px 0;
+
+        box-shadow:
+            0 8px 20px rgba(34,197,94,0.12);
+    }
+
+    .result-warning {
+        background: linear-gradient(
+            135deg,
+            #fffbeb,
+            #fef3c7
+        );
+
+        border-left: 7px solid #f59e0b;
+        border-radius: 16px;
+        padding: 20px;
+        margin: 10px 0;
+
+        box-shadow:
+            0 8px 20px rgba(245,158,11,0.12);
+    }
+
+
+    .result-title {
+        font-size: 1.45rem;
+        font-weight: 850;
+        margin-bottom: 5px;
+    }
+
+    .result-text {
+        color: #475569;
+        font-size: 0.95rem;
+    }
+
+
+    /* =========================================
+       EVIDENCE CARDS
+       ========================================= */
+
+    .info-card {
+        background: rgba(255,255,255,0.92);
+        border-radius: 18px;
+        padding: 20px;
+
+        border: 1px solid #dbeafe;
+
+        box-shadow:
+            0 8px 22px rgba(15,23,42,0.07);
+
+        min-height: 145px;
+        margin-bottom: 15px;
+    }
+
+    .info-card-purple {
+        border-top: 5px solid #8b5cf6;
+    }
+
+    .info-card-orange {
+        border-top: 5px solid #f97316;
+    }
+
+    .info-card-green {
+        border-top: 5px solid #22c55e;
+    }
+
+    .info-card-blue {
+        border-top: 5px solid #3b82f6;
+    }
+
+    .card-title {
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: #312e81;
+        margin-bottom: 8px;
+    }
+
+    .card-text {
+        color: #64748b;
+        line-height: 1.5;
+    }
+
+
+    /* =========================================
+       URL INPUT
+       ========================================= */
+
+    .stTextInput input {
+        border: 2px solid #818cf8 !important;
+        border-radius: 13px !important;
+        background: white !important;
+        padding: 13px !important;
+        font-size: 1rem !important;
+
+        box-shadow:
+            0 4px 12px rgba(79,70,229,0.08);
+    }
+
+    .stTextInput input:focus {
+        border-color: #4f46e5 !important;
+
+        box-shadow:
+            0 0 0 3px rgba(99,102,241,0.15) !important;
+    }
+
+
+    /* =========================================
+       BUTTON
+       ========================================= */
+
+    .stButton > button {
+
+        background:
+            linear-gradient(
+                90deg,
+                #4f46e5,
+                #7c3aed
+            ) !important;
+
+        color: white !important;
+
+        border: none !important;
+        border-radius: 13px !important;
+
+        padding: 0.75rem 1rem !important;
+
+        font-size: 1.05rem !important;
+        font-weight: 800 !important;
+
+        box-shadow:
+            0 8px 18px rgba(79,70,229,0.28);
+
+        transition: all 0.2s ease;
     }
 
     .stButton > button:hover {
-        background: linear-gradient(90deg, #3730a3, #6d28d9);
-        color: white;
+
+        transform: translateY(-2px);
+
+        box-shadow:
+            0 12px 25px rgba(79,70,229,0.35);
     }
 
-    /* URL input */
-    .stTextInput input {
-        border: 2px solid #6366f1;
-        border-radius: 10px;
-        padding: 10px;
-    }
 
-    /* Metrics */
+    /* =========================================
+       METRIC CARDS
+       ========================================= */
+
     [data-testid="stMetric"] {
-        background: white;
+
+        background: rgba(255,255,255,0.95);
+
         padding: 20px;
-        border-radius: 15px;
+
+        border-radius: 18px;
+
         border: 1px solid #c7d2fe;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+
+        box-shadow:
+            0 8px 20px rgba(15,23,42,0.08);
     }
 
-    /* Info boxes */
+    [data-testid="stMetricLabel"] {
+        color: #6366f1 !important;
+        font-weight: 700 !important;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #312e81 !important;
+        font-weight: 900 !important;
+    }
+
+
+    /* =========================================
+       CHECKBOX
+       ========================================= */
+
+    [data-testid="stCheckbox"] {
+        background: rgba(255,255,255,0.75);
+        padding: 8px 14px;
+        border-radius: 12px;
+        border: 1px solid #c7d2fe;
+    }
+
+
+    /* =========================================
+       ALERTS
+       ========================================= */
+
     [data-testid="stAlert"] {
-        border-radius: 12px;
+        border-radius: 14px !important;
     }
 
-    /* Code/domain box */
+
+    /* =========================================
+       CODE BOX
+       ========================================= */
+
     code {
-        border-radius: 8px;
+        border-radius: 10px !important;
     }
 
-    /* Dataframe */
+
+    /* =========================================
+       DATAFRAME
+       ========================================= */
+
     [data-testid="stDataFrame"] {
-        border-radius: 12px;
+        border-radius: 16px;
         overflow: hidden;
+
+        box-shadow:
+            0 8px 20px rgba(15,23,42,0.08);
     }
+
+
+    /* =========================================
+       FEATURE CARDS
+       ========================================= */
+
+    .feature-card {
+        background: rgba(255,255,255,0.92);
+
+        border-radius: 18px;
+
+        padding: 22px;
+
+        min-height: 180px;
+
+        border: 1px solid #e0e7ff;
+
+        box-shadow:
+            0 8px 22px rgba(15,23,42,0.07);
+
+        transition: transform 0.2s ease;
+    }
+
+    .feature-card:hover {
+        transform: translateY(-4px);
+    }
+
+    .feature-icon {
+        font-size: 2.2rem;
+        margin-bottom: 8px;
+    }
+
+    .feature-title {
+        font-size: 1.15rem;
+        font-weight: 850;
+        color: #3730a3;
+        margin-bottom: 8px;
+    }
+
+    .feature-text {
+        color: #64748b;
+        line-height: 1.5;
+    }
+
+
+    /* =========================================
+       FOOTER
+       ========================================= */
+
+    .footer {
+        text-align: center;
+        color: #64748b;
+        padding: 20px;
+        font-size: 0.9rem;
+    }
+
 
 </style>
-""")
+""", unsafe_allow_html=True)
+
 
 # =========================================================
 # HEADER
 # =========================================================
 
-st.title("🛡️ PhishGuard")
+st.markdown("""
+<div class="hero-card">
 
-st.subheader(
-    "AI-Based Intelligent Phishing Domain Detection System"
+    <h2>🛡️ PhishGuard</h2>
+
+    <p>
+        AI-powered phishing domain detection,
+        domain impersonation analysis and
+        risk assessment.
+    </p>
+
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown(
+    '<div class="subtitle">'
+    '🔐 Intelligent URL Security Analysis using Random Forest'
+    '</div>',
+    unsafe_allow_html=True
 )
-
-st.write(
-    "Analyze a URL using Random Forest machine learning, "
-    "domain impersonation analysis, and explainable risk assessment."
-)
-
-st.divider()
 
 
 # =========================================================
-# URL INPUT
+# URL SCANNER
 # =========================================================
 
-st.header("🔍 Analyze a URL")
+st.markdown("""
+<div class="scanner-card">
+
+    <h3>🔍 Scan a Website</h3>
+
+    <p style="color:#64748b;">
+        Enter a website URL below to analyze its
+        security characteristics.
+    </p>
+
+</div>
+""", unsafe_allow_html=True)
+
 
 url = st.text_input(
-    "Enter a website URL",
-    placeholder="Example: https://example.com"
+    "Website URL",
+    placeholder="Example: https://example.com",
+    label_visibility="collapsed"
 )
+
 
 verification_limited = st.checkbox(
     "🔐 This URL requires login or restricted access"
@@ -292,7 +669,10 @@ if st.button(
 
     else:
 
-        # Add HTTPS if protocol is missing
+        # =================================================
+        # ADD HTTPS IF PROTOCOL IS MISSING
+        # =================================================
+
         if not url.startswith(
             ("http://", "https://")
         ):
@@ -326,6 +706,7 @@ if st.button(
             for char in ["@", "-", "_"]
         )
 
+
         suspicious_keywords = [
             "login",
             "verify",
@@ -337,12 +718,14 @@ if st.button(
             "password"
         ]
 
+
         has_suspicious_keyword = int(
             any(
                 word in url.lower()
                 for word in suspicious_keywords
             )
         )
+
 
         found_keywords = [
             word
@@ -371,6 +754,7 @@ if st.button(
                 "has_suspicious_keyword"
             ]
         )
+
 
         prediction = model.predict(features)[0]
 
@@ -401,6 +785,8 @@ if st.button(
         else:
 
             result = "✅ Likely Legitimate"
+
+
         # =================================================
         # RISK SCORE
         # =================================================
@@ -430,7 +816,7 @@ if st.button(
 
 
         # =================================================
-        # SAVE SCAN TO DATABASE
+        # SAVE SCAN
         # =================================================
 
         if is_impersonation:
@@ -462,70 +848,177 @@ if st.button(
 
         st.header("📊 Analysis Result")
 
+
+        # Risk score + domain
         col1, col2 = st.columns(2)
+
 
         with col1:
 
             st.metric(
-                "Risk Score",
+                "🛡️ Risk Score",
                 f"{risk_score}/100"
             )
 
+
         with col2:
 
-            st.write("### Result")
+            st.metric(
+                "🎯 Similarity",
+                f"{similarity}%"
+            )
 
-            if verification_limited:
 
-                st.warning(result)
+        # =================================================
+        # RESULT CARD
+        # =================================================
 
-            elif prediction == 1:
+        if verification_limited:
 
-                st.error(result)
+            st.markdown("""
+            <div class="result-warning">
+
+                <div class="result-title">
+                    🟡 Unverified
+                </div>
+
+                <div class="result-text">
+                    Verification is limited because this
+                    URL requires login or restricted access.
+                </div>
+
+            </div>
+            """, unsafe_allow_html=True)
+
+
+        elif prediction == 1 or is_impersonation:
+
+            st.markdown("""
+            <div class="result-danger">
+
+                <div class="result-title">
+                    🚨 Likely Phishing
+                </div>
+
+                <div class="result-text">
+                    The system detected one or more
+                    suspicious indicators.
+                </div>
+
+            </div>
+            """, unsafe_allow_html=True)
+
+
+        else:
+
+            st.markdown("""
+            <div class="result-safe">
+
+                <div class="result-title">
+                    ✅ Likely Legitimate
+                </div>
+
+                <div class="result-text">
+                    No major phishing indicators were
+                    detected by the current analysis.
+                </div>
+
+            </div>
+            """, unsafe_allow_html=True)
+
+
+        # =================================================
+        # DOMAIN + ML EVIDENCE
+        # =================================================
+
+        st.subheader("🔎 Detection Evidence")
+
+
+        evidence1, evidence2 = st.columns(2)
+
+
+        with evidence1:
+
+            if is_impersonation:
+
+                st.markdown(f"""
+                <div class="info-card info-card-orange">
+
+                    <div class="card-title">
+                        🎭 Brand Impersonation
+                    </div>
+
+                    <div class="card-text">
+                        Possible impersonation of
+                        <b>{matched_brand}</b>.<br><br>
+
+                        Similarity:
+                        <b>{similarity}%</b>
+                    </div>
+
+                </div>
+                """, unsafe_allow_html=True)
 
             else:
 
-                st.success(result)
+                st.markdown("""
+                <div class="info-card info-card-green">
+
+                    <div class="card-title">
+                        🎭 Brand Impersonation
+                    </div>
+
+                    <div class="card-text">
+                        No obvious known-brand
+                        impersonation detected.
+                    </div>
+
+                </div>
+                """, unsafe_allow_html=True)
+
+
+        with evidence2:
+
+            ml_result = (
+                "Phishing"
+                if prediction == 1
+                else "Likely Legitimate"
+            )
+
+            st.markdown(f"""
+            <div class="info-card info-card-purple">
+
+                <div class="card-title">
+                    🤖 Random Forest
+                </div>
+
+                <div class="card-text">
+                    Model prediction:
+                    <b>{ml_result}</b><br><br>
+
+                    Five URL-based features were
+                    analyzed by the classifier.
+                </div>
+
+            </div>
+            """, unsafe_allow_html=True)
 
 
         # =================================================
         # DOMAIN
         # =================================================
 
-        st.write("### 🌐 Domain")
+        st.subheader("🌐 Domain")
 
         st.code(domain)
-
-
-        # =================================================
-        # DOMAIN IMPERSONATION
-        # =================================================
-
-        st.write("### 🎭 Domain Impersonation")
-
-        if is_impersonation:
-
-            st.warning(
-                f"Possible impersonation of "
-                f"**{matched_brand}**"
-            )
-
-            st.write(
-                f"Similarity: **{similarity}%**"
-            )
-
-        else:
-
-            st.success(
-                "No obvious brand impersonation detected."
-            )
 
 
         # =================================================
         # VERIFICATION STATUS
         # =================================================
 
-        st.write("### 🔐 Verification Status")
+        st.subheader("🔐 Verification Status")
+
 
         if verification_limited:
 
@@ -551,55 +1044,82 @@ if st.button(
         # EXTRACTED FEATURES
         # =================================================
 
-        st.write("### 🔎 Extracted Features")
+        st.subheader("🧩 Extracted URL Features")
 
-        col1, col2 = st.columns(2)
 
-        with col1:
+        f1, f2, f3, f4, f5 = st.columns(5)
 
-            st.write(
-                f"**URL Length:** {url_length}"
+
+        with f1:
+
+            st.metric(
+                "URL Length",
+                url_length
             )
 
-            st.write(
-                f"**HTTPS:** "
-                f"{'Yes' if has_https else 'No'}"
+
+        with f2:
+
+            st.metric(
+                "HTTPS",
+                "Yes" if has_https else "No"
             )
 
-            st.write(
-                f"**Number of Dots:** {num_dots}"
+
+        with f3:
+
+            st.metric(
+                "Dots",
+                num_dots
             )
 
-        with col2:
 
-            st.write(
-                f"**Special Characters:** "
-                f"{num_special_chars}"
+        with f4:
+
+            st.metric(
+                "Special Chars",
+                num_special_chars
             )
 
-            st.write(
-                f"**Suspicious Keyword:** "
-                f"{'Yes' if has_suspicious_keyword else 'No'}"
+
+        with f5:
+
+            st.metric(
+                "Suspicious",
+                "Yes" if has_suspicious_keyword else "No"
             )
 
-            if found_keywords:
 
-                st.write(
-                    "**Detected Keywords:** "
-                    + ", ".join(found_keywords)
-                )
+        if found_keywords:
+
+            st.info(
+                "🔎 Detected keywords: "
+                + ", ".join(found_keywords)
+            )
 
 
         # =================================================
         # MACHINE LEARNING MODEL
         # =================================================
 
-        st.write("### 🤖 Machine Learning Model")
+        st.subheader("🤖 Machine Learning Model")
 
-        st.info(
-            "Random Forest classifier trained on "
-            "URL-based features."
-        )
+        st.markdown("""
+        <div class="info-card info-card-blue">
+
+            <div class="card-title">
+                🌲 Random Forest Classifier
+            </div>
+
+            <div class="card-text">
+                PhishGuard uses a Random Forest classifier
+                trained using URL-based features such as
+                URL length, HTTPS usage, number of dots,
+                special characters and suspicious keywords.
+            </div>
+
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # =========================================================
@@ -610,7 +1130,9 @@ st.divider()
 
 st.header("📜 Scan History")
 
+
 connection = sqlite3.connect("phishguard.db")
+
 
 history = pd.read_sql_query(
     """
@@ -628,6 +1150,7 @@ history = pd.read_sql_query(
     connection
 )
 
+
 connection.close()
 
 
@@ -642,46 +1165,87 @@ if not history.empty:
 else:
 
     st.info(
-        "No scan history available yet."
+        "📭 No scan history available yet."
     )
 
 
 # =========================================================
-# FEATURES SECTION
+# WHAT PHISHGUARD ANALYZES
 # =========================================================
 
 st.divider()
 
 st.header("🛡️ What PhishGuard Analyzes")
 
+
 col1, col2, col3 = st.columns(3)
+
 
 with col1:
 
-    st.subheader("🤖 Random Forest")
+    st.markdown("""
+    <div class="feature-card">
 
-    st.write(
-        "Analyzes URL and domain features using "
-        "a machine-learning classifier."
-    )
+        <div class="feature-icon">
+            🤖
+        </div>
+
+        <div class="feature-title">
+            Random Forest
+        </div>
+
+        <div class="feature-text">
+            Analyzes URL-based features using
+            a machine-learning classifier.
+        </div>
+
+    </div>
+    """, unsafe_allow_html=True)
+
 
 with col2:
 
-    st.subheader("🎭 Impersonation Detection")
+    st.markdown("""
+    <div class="feature-card">
 
-    st.write(
-        "Identifies possible brand impersonation "
-        "and typosquatting."
-    )
+        <div class="feature-icon">
+            🎭
+        </div>
+
+        <div class="feature-title">
+            Impersonation Detection
+        </div>
+
+        <div class="feature-text">
+            Identifies possible brand impersonation,
+            character substitutions and suspicious
+            domain similarities.
+        </div>
+
+    </div>
+    """, unsafe_allow_html=True)
+
 
 with col3:
 
-    st.subheader("📊 Risk Assessment")
+    st.markdown("""
+    <div class="feature-card">
 
-    st.write(
-        "Provides a project-defined 0–100 risk score "
-        "with supporting evidence."
-    )
+        <div class="feature-icon">
+            📊
+        </div>
+
+        <div class="feature-title">
+            Risk Assessment
+        </div>
+
+        <div class="feature-text">
+            Provides a project-defined 0–100
+            risk score with supporting evidence.
+        </div>
+
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =========================================================
@@ -690,7 +1254,16 @@ with col3:
 
 st.divider()
 
-st.caption(
-    "PhishGuard | AI-Based Intelligent Phishing "
-    "Domain Detection System"
-)
+st.markdown("""
+<div class="footer">
+
+    🛡️ <b>PhishGuard</b><br>
+
+    AI-Based Intelligent Phishing Domain Detection System<br>
+
+    <small>
+        Random Forest • Domain Impersonation Analysis • Risk Assessment
+    </small>
+
+</div>
+""", unsafe_allow_html=True)
