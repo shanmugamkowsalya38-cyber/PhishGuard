@@ -94,12 +94,13 @@ def check_impersonation(domain):
         "instagram"
     ]
 
-    # Remove port number and convert to lowercase
+    # Remove port number
     host = domain.lower().split(":")[0]
 
-    # Split domain labels and ignore www
+    # Split domain and ignore www
     labels = [
-        part for part in host.split(".")
+        part
+        for part in host.split(".")
         if part and part != "www"
     ]
 
@@ -123,7 +124,7 @@ def check_impersonation(domain):
                 brand
             ).ratio()
 
-            # Strong indicator:
+            # Example:
             # paypa1 -> paypal
             if normalized_label == brand and label != brand:
                 similarity = 1.0
@@ -137,7 +138,6 @@ def check_impersonation(domain):
                 best_similarity = similarity
                 best_match = brand
 
-                # Do not flag genuine brand domains
                 if label != brand and similarity >= 0.75:
                     impersonation_detected = True
 
@@ -161,486 +161,525 @@ st.set_page_config(
 
 
 # =========================================================
-# ATTRACTIVE CYBERSECURITY UI
+# CUSTOM CSS
 # =========================================================
 
 st.markdown("""
 <style>
 
-    /* =========================================
-       MAIN BACKGROUND
-       ========================================= */
-
-    .stApp {
-        background:
-            radial-gradient(
-                circle at 10% 10%,
-                rgba(99,102,241,0.18),
-                transparent 28%
-            ),
-            radial-gradient(
-                circle at 90% 20%,
-                rgba(168,85,247,0.16),
-                transparent 30%
-            ),
-            radial-gradient(
-                circle at 50% 100%,
-                rgba(14,165,233,0.12),
-                transparent 30%
-            ),
-            linear-gradient(
-                135deg,
-                #f8faff 0%,
-                #eef2ff 50%,
-                #f0f9ff 100%
-            );
-    }
+.stApp {
+    background:
+        radial-gradient(
+            circle at 10% 10%,
+            rgba(99,102,241,0.18),
+            transparent 28%
+        ),
+        radial-gradient(
+            circle at 90% 20%,
+            rgba(168,85,247,0.16),
+            transparent 30%
+        ),
+        radial-gradient(
+            circle at 50% 100%,
+            rgba(14,165,233,0.12),
+            transparent 30%
+        ),
+        linear-gradient(
+            135deg,
+            #f8faff 0%,
+            #eef2ff 50%,
+            #f0f9ff 100%
+        );
+}
 
 
-    /* =========================================
-       REMOVE EXTRA TOP SPACE
-       ========================================= */
+/* Main container */
 
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-    }
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+}
 
 
-    /* =========================================
-       HEADINGS
-       ========================================= */
+/* Main headings */
 
-    h1 {
-        text-align: center !important;
-        font-size: 3.2rem !important;
-        font-weight: 900 !important;
-        color: #312e81 !important;
-        letter-spacing: -1px;
-    }
+h1 {
+    text-align: center !important;
+    font-size: 3rem !important;
+    font-weight: 900 !important;
+    color: #312e81 !important;
+}
 
-    h2 {
-        color: #3730a3 !important;
-        font-weight: 800 !important;
-    }
+h2 {
+    color: #3730a3 !important;
+    font-weight: 800 !important;
+}
 
-    h3 {
-        color: #4338ca !important;
-        font-weight: 750 !important;
-    }
+h3 {
+    color: #4338ca !important;
+    font-weight: 800 !important;
+}
 
 
-    /* =========================================
-       SUBTITLE
-       ========================================= */
+/* Hero */
 
-    .subtitle {
-        text-align: center;
-        font-size: 1.15rem;
-        color: #475569;
-        margin-top: -15px;
-        margin-bottom: 10px;
-    }
+.hero-card {
+    background:
+        linear-gradient(
+            135deg,
+            #4f46e5,
+            #7c3aed
+        );
 
+    padding: 30px;
 
-    /* =========================================
-       HERO CARD
-       ========================================= */
+    border-radius: 24px;
 
-    .hero-card {
-        background:
-            linear-gradient(
-                135deg,
-                rgba(79,70,229,0.96),
-                rgba(124,58,237,0.96)
-            );
+    color: white;
 
-        padding: 28px;
-        border-radius: 22px;
-        color: white;
-        margin: 20px 0 25px 0;
+    margin: 10px 0 25px 0;
 
-        box-shadow:
-            0 15px 35px rgba(79,70,229,0.25);
+    box-shadow:
+        0 15px 35px rgba(79,70,229,0.30);
 
-        border: 1px solid rgba(255,255,255,0.25);
-    }
+    border: 1px solid rgba(255,255,255,0.30);
+}
 
-    .hero-card h2 {
-        color: white !important;
-        margin-bottom: 8px;
-    }
+.hero-card h2 {
+    color: white !important;
+    font-size: 2.2rem !important;
+    margin-bottom: 10px;
+}
 
-    .hero-card p {
-        color: #eef2ff;
-        font-size: 1rem;
-    }
+.hero-card p {
+    color: #eef2ff;
+    font-size: 1.05rem;
+    margin-bottom: 0;
+}
 
 
-    /* =========================================
-       SCANNER CARD
-       ========================================= */
+/* Subtitle */
 
-    .scanner-card {
-        background: rgba(255,255,255,0.90);
-        border: 1px solid #c7d2fe;
-        border-radius: 20px;
-        padding: 24px;
-
-        box-shadow:
-            0 10px 30px rgba(30,41,59,0.08);
-
-        margin-bottom: 20px;
-    }
+.subtitle {
+    text-align: center;
+    font-size: 1.1rem;
+    color: #475569;
+    margin: 10px 0 25px 0;
+}
 
 
-    /* =========================================
-       RESULT CARDS
-       ========================================= */
+/* Scanner */
 
-    .result-danger {
-        background: linear-gradient(
+.scanner-card {
+    background: rgba(255,255,255,0.95);
+
+    border: 1px solid #c7d2fe;
+
+    border-radius: 20px;
+
+    padding: 24px;
+
+    margin-bottom: 15px;
+
+    box-shadow:
+        0 10px 30px rgba(30,41,59,0.08);
+}
+
+.scanner-card h3 {
+    margin-top: 0;
+}
+
+.scanner-card p {
+    color: #64748b;
+}
+
+
+/* URL input */
+
+.stTextInput input {
+
+    border: 2px solid #818cf8 !important;
+
+    border-radius: 13px !important;
+
+    background: white !important;
+
+    padding: 13px !important;
+
+    font-size: 1rem !important;
+
+    box-shadow:
+        0 4px 12px rgba(79,70,229,0.08);
+}
+
+.stTextInput input:focus {
+
+    border-color: #4f46e5 !important;
+
+    box-shadow:
+        0 0 0 3px rgba(99,102,241,0.15) !important;
+}
+
+
+/* Button */
+
+.stButton > button {
+
+    background:
+        linear-gradient(
+            90deg,
+            #4f46e5,
+            #7c3aed
+        ) !important;
+
+    color: white !important;
+
+    border: none !important;
+
+    border-radius: 13px !important;
+
+    padding: 0.75rem 1rem !important;
+
+    font-size: 1.05rem !important;
+
+    font-weight: 800 !important;
+
+    box-shadow:
+        0 8px 18px rgba(79,70,229,0.28);
+
+    transition: all 0.2s ease;
+}
+
+.stButton > button:hover {
+
+    transform: translateY(-2px);
+
+    box-shadow:
+        0 12px 25px rgba(79,70,229,0.35);
+}
+
+
+/* Checkbox */
+
+[data-testid="stCheckbox"] {
+
+    background: rgba(255,255,255,0.80);
+
+    padding: 8px 14px;
+
+    border-radius: 12px;
+
+    border: 1px solid #c7d2fe;
+}
+
+
+/* Metrics */
+
+[data-testid="stMetric"] {
+
+    background: rgba(255,255,255,0.95);
+
+    padding: 20px;
+
+    border-radius: 18px;
+
+    border: 1px solid #c7d2fe;
+
+    box-shadow:
+        0 8px 20px rgba(15,23,42,0.08);
+}
+
+[data-testid="stMetricLabel"] {
+
+    color: #6366f1 !important;
+
+    font-weight: 700 !important;
+}
+
+[data-testid="stMetricValue"] {
+
+    color: #312e81 !important;
+
+    font-weight: 900 !important;
+}
+
+
+/* Alerts */
+
+[data-testid="stAlert"] {
+    border-radius: 14px !important;
+}
+
+
+/* Code */
+
+code {
+    border-radius: 10px !important;
+}
+
+
+/* Result cards */
+
+.result-danger {
+
+    background:
+        linear-gradient(
             135deg,
             #fff1f2,
             #ffe4e6
         );
 
-        border-left: 7px solid #ef4444;
-        border-radius: 16px;
-        padding: 20px;
-        margin: 10px 0;
+    border-left: 7px solid #ef4444;
 
-        box-shadow:
-            0 8px 20px rgba(239,68,68,0.12);
-    }
+    border-radius: 16px;
 
-    .result-safe {
-        background: linear-gradient(
+    padding: 20px;
+
+    margin: 10px 0;
+
+    box-shadow:
+        0 8px 20px rgba(239,68,68,0.12);
+}
+
+.result-safe {
+
+    background:
+        linear-gradient(
             135deg,
             #f0fdf4,
             #dcfce7
         );
 
-        border-left: 7px solid #22c55e;
-        border-radius: 16px;
-        padding: 20px;
-        margin: 10px 0;
+    border-left: 7px solid #22c55e;
 
-        box-shadow:
-            0 8px 20px rgba(34,197,94,0.12);
-    }
+    border-radius: 16px;
 
-    .result-warning {
-        background: linear-gradient(
+    padding: 20px;
+
+    margin: 10px 0;
+
+    box-shadow:
+        0 8px 20px rgba(34,197,94,0.12);
+}
+
+.result-warning {
+
+    background:
+        linear-gradient(
             135deg,
             #fffbeb,
             #fef3c7
         );
 
-        border-left: 7px solid #f59e0b;
-        border-radius: 16px;
-        padding: 20px;
-        margin: 10px 0;
+    border-left: 7px solid #f59e0b;
 
-        box-shadow:
-            0 8px 20px rgba(245,158,11,0.12);
-    }
+    border-radius: 16px;
 
+    padding: 20px;
 
-    .result-title {
-        font-size: 1.45rem;
-        font-weight: 850;
-        margin-bottom: 5px;
-    }
+    margin: 10px 0;
 
-    .result-text {
-        color: #475569;
-        font-size: 0.95rem;
-    }
+    box-shadow:
+        0 8px 20px rgba(245,158,11,0.12);
+}
 
 
-    /* =========================================
-       EVIDENCE CARDS
-       ========================================= */
+.result-title {
 
-    .info-card {
-        background: rgba(255,255,255,0.92);
-        border-radius: 18px;
-        padding: 20px;
+    font-size: 1.45rem;
 
-        border: 1px solid #dbeafe;
+    font-weight: 850;
 
-        box-shadow:
-            0 8px 22px rgba(15,23,42,0.07);
+    margin-bottom: 5px;
+}
 
-        min-height: 145px;
-        margin-bottom: 15px;
-    }
+.result-text {
 
-    .info-card-purple {
-        border-top: 5px solid #8b5cf6;
-    }
+    color: #475569;
 
-    .info-card-orange {
-        border-top: 5px solid #f97316;
-    }
+    font-size: 0.95rem;
+}
 
-    .info-card-green {
-        border-top: 5px solid #22c55e;
-    }
 
-    .info-card-blue {
-        border-top: 5px solid #3b82f6;
-    }
+/* Evidence cards */
 
-    .card-title {
-        font-size: 1.1rem;
-        font-weight: 800;
-        color: #312e81;
-        margin-bottom: 8px;
-    }
+.info-card {
 
-    .card-text {
-        color: #64748b;
-        line-height: 1.5;
-    }
+    background: rgba(255,255,255,0.95);
 
+    border-radius: 18px;
 
-    /* =========================================
-       URL INPUT
-       ========================================= */
+    padding: 20px;
 
-    .stTextInput input {
-        border: 2px solid #818cf8 !important;
-        border-radius: 13px !important;
-        background: white !important;
-        padding: 13px !important;
-        font-size: 1rem !important;
+    border: 1px solid #dbeafe;
 
-        box-shadow:
-            0 4px 12px rgba(79,70,229,0.08);
-    }
+    box-shadow:
+        0 8px 22px rgba(15,23,42,0.07);
 
-    .stTextInput input:focus {
-        border-color: #4f46e5 !important;
+    min-height: 145px;
 
-        box-shadow:
-            0 0 0 3px rgba(99,102,241,0.15) !important;
-    }
+    margin-bottom: 15px;
+}
 
+.info-card-purple {
+    border-top: 5px solid #8b5cf6;
+}
 
-    /* =========================================
-       BUTTON
-       ========================================= */
+.info-card-orange {
+    border-top: 5px solid #f97316;
+}
 
-    .stButton > button {
+.info-card-green {
+    border-top: 5px solid #22c55e;
+}
 
-        background:
-            linear-gradient(
-                90deg,
-                #4f46e5,
-                #7c3aed
-            ) !important;
+.info-card-blue {
+    border-top: 5px solid #3b82f6;
+}
 
-        color: white !important;
+.card-title {
 
-        border: none !important;
-        border-radius: 13px !important;
+    font-size: 1.1rem;
 
-        padding: 0.75rem 1rem !important;
+    font-weight: 800;
 
-        font-size: 1.05rem !important;
-        font-weight: 800 !important;
+    color: #312e81;
 
-        box-shadow:
-            0 8px 18px rgba(79,70,229,0.28);
+    margin-bottom: 8px;
+}
 
-        transition: all 0.2s ease;
-    }
+.card-text {
 
-    .stButton > button:hover {
+    color: #64748b;
 
-        transform: translateY(-2px);
+    line-height: 1.5;
+}
 
-        box-shadow:
-            0 12px 25px rgba(79,70,229,0.35);
-    }
 
+/* Feature cards */
 
-    /* =========================================
-       METRIC CARDS
-       ========================================= */
+.feature-card {
 
-    [data-testid="stMetric"] {
+    background: rgba(255,255,255,0.95);
 
-        background: rgba(255,255,255,0.95);
+    border-radius: 18px;
 
-        padding: 20px;
+    padding: 22px;
 
-        border-radius: 18px;
+    min-height: 190px;
 
-        border: 1px solid #c7d2fe;
+    border: 1px solid #e0e7ff;
 
-        box-shadow:
-            0 8px 20px rgba(15,23,42,0.08);
-    }
+    box-shadow:
+        0 8px 22px rgba(15,23,42,0.07);
 
-    [data-testid="stMetricLabel"] {
-        color: #6366f1 !important;
-        font-weight: 700 !important;
-    }
+    transition: transform 0.2s ease;
+}
 
-    [data-testid="stMetricValue"] {
-        color: #312e81 !important;
-        font-weight: 900 !important;
-    }
+.feature-card:hover {
+    transform: translateY(-4px);
+}
 
+.feature-icon {
+    font-size: 2.3rem;
+    margin-bottom: 8px;
+}
 
-    /* =========================================
-       CHECKBOX
-       ========================================= */
+.feature-title {
 
-    [data-testid="stCheckbox"] {
-        background: rgba(255,255,255,0.75);
-        padding: 8px 14px;
-        border-radius: 12px;
-        border: 1px solid #c7d2fe;
-    }
+    font-size: 1.15rem;
 
+    font-weight: 850;
 
-    /* =========================================
-       ALERTS
-       ========================================= */
+    color: #3730a3;
 
-    [data-testid="stAlert"] {
-        border-radius: 14px !important;
-    }
+    margin-bottom: 8px;
+}
 
+.feature-text {
 
-    /* =========================================
-       CODE BOX
-       ========================================= */
+    color: #64748b;
 
-    code {
-        border-radius: 10px !important;
-    }
+    line-height: 1.5;
+}
 
 
-    /* =========================================
-       DATAFRAME
-       ========================================= */
+/* Dataframe */
 
-    [data-testid="stDataFrame"] {
-        border-radius: 16px;
-        overflow: hidden;
+[data-testid="stDataFrame"] {
 
-        box-shadow:
-            0 8px 20px rgba(15,23,42,0.08);
-    }
+    border-radius: 16px;
 
+    overflow: hidden;
 
-    /* =========================================
-       FEATURE CARDS
-       ========================================= */
+    box-shadow:
+        0 8px 20px rgba(15,23,42,0.08);
+}
 
-    .feature-card {
-        background: rgba(255,255,255,0.92);
 
-        border-radius: 18px;
+/* Footer */
 
-        padding: 22px;
+.footer {
 
-        min-height: 180px;
+    text-align: center;
 
-        border: 1px solid #e0e7ff;
+    color: #64748b;
 
-        box-shadow:
-            0 8px 22px rgba(15,23,42,0.07);
+    padding: 20px;
 
-        transition: transform 0.2s ease;
-    }
+    font-size: 0.9rem;
+}
 
-    .feature-card:hover {
-        transform: translateY(-4px);
-    }
-
-    .feature-icon {
-        font-size: 2.2rem;
-        margin-bottom: 8px;
-    }
-
-    .feature-title {
-        font-size: 1.15rem;
-        font-weight: 850;
-        color: #3730a3;
-        margin-bottom: 8px;
-    }
-
-    .feature-text {
-        color: #64748b;
-        line-height: 1.5;
-    }
-
-
-    /* =========================================
-       FOOTER
-       ========================================= */
-
-    .footer {
-        text-align: center;
-        color: #64748b;
-        padding: 20px;
-        font-size: 0.9rem;
-    }
-
+.footer b {
+    color: #4338ca;
+    font-size: 1.05rem;
+}
 
 </style>
 """, unsafe_allow_html=True)
 
 
 # =========================================================
-# HEADER
+# HERO HEADER
 # =========================================================
 
-st.markdown("""
+st.html("""
 <div class="hero-card">
-
     <h2>🛡️ PhishGuard</h2>
-
     <p>
         AI-powered phishing domain detection,
         domain impersonation analysis and
         risk assessment.
     </p>
-
 </div>
-""", unsafe_allow_html=True)
+""")
 
-st.markdown(
-    '<div class="subtitle">'
-    '🔐 Intelligent URL Security Analysis using Random Forest'
-    '</div>',
-    unsafe_allow_html=True
-)
+
+st.html("""
+<div class="subtitle">
+    🔐 Intelligent URL Security Analysis using Random Forest
+</div>
+""")
 
 
 # =========================================================
-# URL SCANNER
+# SCANNER CARD
 # =========================================================
 
-st.markdown("""
+st.html("""
 <div class="scanner-card">
-
     <h3>🔍 Scan a Website</h3>
-
-    <p style="color:#64748b;">
+    <p>
         Enter a website URL below to analyze its
         security characteristics.
     </p>
-
 </div>
-""", unsafe_allow_html=True)
+""")
 
+
+# =========================================================
+# URL INPUT
+# =========================================================
 
 url = st.text_input(
     "Website URL",
@@ -670,7 +709,7 @@ if st.button(
     else:
 
         # =================================================
-        # ADD HTTPS IF PROTOCOL IS MISSING
+        # ADD HTTPS
         # =================================================
 
         if not url.startswith(
@@ -700,6 +739,7 @@ if st.button(
         )
 
         num_dots = url.count(".")
+
 
         num_special_chars = sum(
             url.count(char)
@@ -760,7 +800,7 @@ if st.button(
 
 
         # =================================================
-        # DOMAIN IMPERSONATION
+        # IMPERSONATION ANALYSIS
         # =================================================
 
         (
@@ -805,9 +845,11 @@ if st.button(
 
                 risk_score = 20
 
+
             if is_impersonation:
 
                 risk_score += 20
+
 
             risk_score = min(
                 risk_score,
@@ -816,7 +858,7 @@ if st.button(
 
 
         # =================================================
-        # SAVE SCAN
+        # IMPERSONATION TEXT
         # =================================================
 
         if is_impersonation:
@@ -829,6 +871,10 @@ if st.button(
 
             impersonation_text = "None detected"
 
+
+        # =================================================
+        # SAVE TO DATABASE
+        # =================================================
 
         save_scan(
             url,
@@ -849,8 +895,11 @@ if st.button(
         st.header("📊 Analysis Result")
 
 
-        # Risk score + domain
-        col1, col2 = st.columns(2)
+        # =================================================
+        # SCORE CARDS
+        # =================================================
+
+        col1, col2, col3 = st.columns(3)
 
 
         with col1:
@@ -864,18 +913,26 @@ if st.button(
         with col2:
 
             st.metric(
-                "🎯 Similarity",
+                "🎯 Domain Similarity",
                 f"{similarity}%"
             )
 
 
+        with col3:
+
+            st.metric(
+                "🔗 HTTPS",
+                "Enabled" if has_https else "Disabled"
+            )
+
+
         # =================================================
-        # RESULT CARD
+        # FINAL RESULT CARD
         # =================================================
 
         if verification_limited:
 
-            st.markdown("""
+            st.html("""
             <div class="result-warning">
 
                 <div class="result-title">
@@ -888,12 +945,12 @@ if st.button(
                 </div>
 
             </div>
-            """, unsafe_allow_html=True)
+            """)
 
 
         elif prediction == 1 or is_impersonation:
 
-            st.markdown("""
+            st.html("""
             <div class="result-danger">
 
                 <div class="result-title">
@@ -906,12 +963,12 @@ if st.button(
                 </div>
 
             </div>
-            """, unsafe_allow_html=True)
+            """)
 
 
         else:
 
-            st.markdown("""
+            st.html("""
             <div class="result-safe">
 
                 <div class="result-title">
@@ -924,11 +981,11 @@ if st.button(
                 </div>
 
             </div>
-            """, unsafe_allow_html=True)
+            """)
 
 
         # =================================================
-        # DOMAIN + ML EVIDENCE
+        # DETECTION EVIDENCE
         # =================================================
 
         st.subheader("🔎 Detection Evidence")
@@ -937,11 +994,15 @@ if st.button(
         evidence1, evidence2 = st.columns(2)
 
 
+        # =================================================
+        # IMPERSONATION CARD
+        # =================================================
+
         with evidence1:
 
             if is_impersonation:
 
-                st.markdown(f"""
+                st.html(f"""
                 <div class="info-card info-card-orange">
 
                     <div class="card-title">
@@ -950,18 +1011,18 @@ if st.button(
 
                     <div class="card-text">
                         Possible impersonation of
-                        <b>{matched_brand}</b>.<br><br>
-
+                        <b>{matched_brand}</b>.
+                        <br><br>
                         Similarity:
                         <b>{similarity}%</b>
                     </div>
 
                 </div>
-                """, unsafe_allow_html=True)
+                """)
 
             else:
 
-                st.markdown("""
+                st.html("""
                 <div class="info-card info-card-green">
 
                     <div class="card-title">
@@ -974,8 +1035,12 @@ if st.button(
                     </div>
 
                 </div>
-                """, unsafe_allow_html=True)
+                """)
 
+
+        # =================================================
+        # RANDOM FOREST CARD
+        # =================================================
 
         with evidence2:
 
@@ -985,7 +1050,8 @@ if st.button(
                 else "Likely Legitimate"
             )
 
-            st.markdown(f"""
+
+            st.html(f"""
             <div class="info-card info-card-purple">
 
                 <div class="card-title">
@@ -994,14 +1060,14 @@ if st.button(
 
                 <div class="card-text">
                     Model prediction:
-                    <b>{ml_result}</b><br><br>
-
+                    <b>{ml_result}</b>
+                    <br><br>
                     Five URL-based features were
                     analyzed by the classifier.
                 </div>
 
             </div>
-            """, unsafe_allow_html=True)
+            """)
 
 
         # =================================================
@@ -1104,7 +1170,8 @@ if st.button(
 
         st.subheader("🤖 Machine Learning Model")
 
-        st.markdown("""
+
+        st.html("""
         <div class="info-card info-card-blue">
 
             <div class="card-title">
@@ -1119,7 +1186,7 @@ if st.button(
             </div>
 
         </div>
-        """, unsafe_allow_html=True)
+        """)
 
 
 # =========================================================
@@ -1181,9 +1248,13 @@ st.header("🛡️ What PhishGuard Analyzes")
 col1, col2, col3 = st.columns(3)
 
 
+# =========================================================
+# RANDOM FOREST FEATURE
+# =========================================================
+
 with col1:
 
-    st.markdown("""
+    st.html("""
     <div class="feature-card">
 
         <div class="feature-icon">
@@ -1200,12 +1271,16 @@ with col1:
         </div>
 
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
+
+# =========================================================
+# IMPERSONATION FEATURE
+# =========================================================
 
 with col2:
 
-    st.markdown("""
+    st.html("""
     <div class="feature-card">
 
         <div class="feature-icon">
@@ -1223,12 +1298,16 @@ with col2:
         </div>
 
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
+
+# =========================================================
+# RISK FEATURE
+# =========================================================
 
 with col3:
 
-    st.markdown("""
+    st.html("""
     <div class="feature-card">
 
         <div class="feature-icon">
@@ -1245,7 +1324,7 @@ with col3:
         </div>
 
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
 
 # =========================================================
@@ -1254,16 +1333,21 @@ with col3:
 
 st.divider()
 
-st.markdown("""
+
+st.html("""
 <div class="footer">
 
-    🛡️ <b>PhishGuard</b><br>
+    🛡️ <b>PhishGuard</b>
+    <br><br>
 
-    AI-Based Intelligent Phishing Domain Detection System<br>
+    AI-Based Intelligent Phishing Domain Detection System
+
+    <br><br>
 
     <small>
-        Random Forest • Domain Impersonation Analysis • Risk Assessment
+        Random Forest • Domain Impersonation Analysis •
+        Risk Assessment
     </small>
 
 </div>
-""", unsafe_allow_html=True)
+""")
