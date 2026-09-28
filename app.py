@@ -278,65 +278,6 @@ def brand_analysis(hostname):
     )
 
 
-def expected_domain_analysis(hostname, expected):
-    """
-    Optional comparison used when an examiner gives a known
-    organization/domain such as hitech9zero.examly.io.
-    """
-    if not expected.strip():
-        return False, 0, []
-
-    expected_value = expected.strip().lower()
-
-    if "://" in expected_value:
-        try:
-            expected_value = (
-                urlparse(expected_value).hostname
-                or expected_value
-            )
-        except Exception:
-            pass
-
-    expected_value = expected_value.rstrip(".")
-    actual = hostname.lower().rstrip(".")
-
-    if (
-        actual == expected_value
-        or actual.endswith("." + expected_value)
-    ):
-        return False, 100, [
-            f"Host matches the supplied expected domain "
-            f"'{expected_value}'."
-        ]
-
-    actual_base = get_base_domain(actual)
-    expected_base = get_base_domain(expected_value)
-
-    full_score = round(
-        SequenceMatcher(
-            None, actual, expected_value
-        ).ratio() * 100
-    )
-
-    base_score = round(
-        SequenceMatcher(
-            None, actual_base, expected_base
-        ).ratio() * 100
-    )
-
-    score = max(full_score, base_score)
-    suspicious = score >= 75
-
-    reasons = []
-    if suspicious:
-        reasons.append(
-            f"Host is similar to the supplied expected domain "
-            f"('{expected_value}') but is not an exact match."
-        )
-
-    return suspicious, score, reasons
-
-
 def model_prediction(features):
     if model is None:
         return None, None
@@ -512,7 +453,6 @@ def build_assessment(
     features,
     ml_prediction,
     brand_impersonation,
-    expected_impersonation,
     reachability
 ):
     points = 0
@@ -584,11 +524,6 @@ def build_assessment(
             "Possible known-brand impersonation was detected."
         )
 
-    if expected_impersonation:
-        points += 30
-        reasons.append(
-            "The supplied expected domain does not match the host."
-        )
 
     # ML evidence
     if ml_prediction == 1:
@@ -647,25 +582,9 @@ st.write(
     "uses Random Forest when available, and explains the result."
 )
 
-with st.expander("⚙️ Demo settings", expanded=True):
-    expected_domain = st.text_input(
-        "Optional: expected legitimate domain",
-        placeholder=(
-            "Example: examly.io or "
-            "hitech9zero.examly.io"
-        ),
-        help=(
-            "Use this when the examiner gives a known "
-            "organization/domain to verify."
-        )
-    )
-
 url_input = st.text_input(
     "🔗 Enter a website URL or domain",
-    placeholder=(
-        "https://example.com  or  "
-        "hitech9zero.examly.io"
-    )
+    placeholder="https://example.com or example.com"
 )
 
 analyze = st.button(
@@ -685,9 +604,7 @@ if analyze:
             st.write("• " + error)
 
         st.info(
-            "Valid examples: "
-            "https://example.com  or  "
-            "hitech9zero.examly.io"
+            "Valid example: https://example.com or example.com"
         )
 
         st.stop()
@@ -713,17 +630,7 @@ if analyze:
         brand_reasons
     ) = brand_analysis(host)
 
-    # 4. Optional examiner-provided expected-domain comparison
-    (
-        expected_impersonation,
-        expected_similarity,
-        expected_reasons
-    ) = expected_domain_analysis(
-        host,
-        expected_domain
-    )
-
-    # 5. Actual DNS/website reachability
+    # 4. Actual DNS/website reachability
     reachability = reachability_check(parsed)
 
     # 6. Evidence fusion
@@ -731,13 +638,11 @@ if analyze:
         features,
         ml_prediction,
         brand_impersonation,
-        expected_impersonation,
         reachability
     )
 
     reasons = (
         brand_reasons
-        + expected_reasons
         + reasons
     )
 
@@ -754,17 +659,10 @@ if analyze:
         impersonation_text = (
             f"Possible {matched_brand} impersonation"
         )
-    elif expected_impersonation:
-        impersonation_text = (
-            "Possible expected-domain mismatch"
-        )
     else:
         impersonation_text = "None detected"
 
-    similarity_to_save = max(
-        brand_similarity,
-        expected_similarity
-    )
+    similarity_to_save = brand_similarity
 
     save_scan(
         normalized_url,
@@ -887,20 +785,6 @@ if analyze:
             "No close match was found in the project's "
             "known-brand list."
         )
-
-    if expected_domain.strip():
-
-        if expected_impersonation:
-            st.warning(
-                f"Expected-domain comparison: possible "
-                f"mismatch ({expected_similarity}% similarity)."
-            )
-
-        else:
-            st.success(
-                "Expected-domain comparison: host matches "
-                "or does not strongly resemble a different domain."
-            )
 
     # =====================================================
     # FEATURES
