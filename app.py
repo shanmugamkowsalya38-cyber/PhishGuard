@@ -699,7 +699,7 @@ verification_limited = st.checkbox(
 
 if st.button(
     "🔎 Analyze URL",
-    use_container_width=True
+    width="stretch"
 ):
 
     if not url:
@@ -1225,7 +1225,7 @@ if not history.empty:
 
     st.dataframe(
         history,
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
 
