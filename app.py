@@ -309,16 +309,15 @@ if st.button(
 
         if verification_limited:
 
-            result = "🟡 Unverified"
+    result = "🟡 Unverified"
 
-        elif prediction == 1:
+elif prediction == 1 or is_impersonation:
 
-            result = "🚨 Likely Phishing"
+    result = "🚨 Likely Phishing"
 
-        else:
+else:
 
-            result = "✅ Likely Legitimate"
-
+    result = "✅ Likely Legitimate"
 
         # =================================================
         # RISK SCORE
