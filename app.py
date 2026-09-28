@@ -158,7 +158,90 @@ st.set_page_config(
     page_icon="🛡️",
     layout="wide"
 )
+# =========================================================
+# COLORFUL UI STYLING
+# =========================================================
 
+st.markdown("""
+<style>
+
+    /* Main background */
+    .stApp {
+        background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 50%, #e0f2fe 100%);
+    }
+
+    /* Main title */
+    h1 {
+        color: #312e81;
+        font-weight: 800;
+        text-align: center;
+    }
+
+    /* Subtitles and headings */
+    h2 {
+        color: #1e3a8a;
+    }
+
+    h3 {
+        color: #3730a3;
+    }
+
+    /* Header description */
+    .stSubheader {
+        text-align: center;
+    }
+
+    /* Analyze button */
+    .stButton > button {
+        background: linear-gradient(90deg, #4f46e5, #7c3aed);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.7rem 1rem;
+        font-weight: 700;
+        font-size: 16px;
+        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+    }
+
+    .stButton > button:hover {
+        background: linear-gradient(90deg, #3730a3, #6d28d9);
+        color: white;
+    }
+
+    /* URL input */
+    .stTextInput input {
+        border: 2px solid #6366f1;
+        border-radius: 10px;
+        padding: 10px;
+    }
+
+    /* Metrics */
+    [data-testid="stMetric"] {
+        background: white;
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid #c7d2fe;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    /* Info boxes */
+    [data-testid="stAlert"] {
+        border-radius: 12px;
+    }
+
+    /* Code/domain box */
+    code {
+        border-radius: 8px;
+    }
+
+    /* Dataframe */
+    [data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+</style>
+""")
 
 # =========================================================
 # HEADER
