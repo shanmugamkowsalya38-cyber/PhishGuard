@@ -2,28 +2,71 @@ import streamlit as st
 from urllib.parse import urlparse
 from difflib import SequenceMatcher
 import pandas as pd
-import joblib
 import sqlite3
+import socket
+import ssl
+import ipaddress
+import re
+import math
 from datetime import datetime
+from pathlib import Path
+
+# Optional ML model. The app still works if the model is unavailable.
+try:
+    import joblib
+except Exception:
+    joblib = None
+
+MODEL_FILE = "phishguard_model.pkl"
+DB_FILE = "phishguard.db"
+
+# These 5 features remain compatible with the existing Random Forest model.
+MODEL_FEATURES = [
+    "url_length",
+    "has_https",
+    "num_dots",
+    "num_special_chars",
+    "has_suspicious_keyword",
+]
+
+SUSPICIOUS_KEYWORDS = [
+    "login", "signin", "verify", "verification", "update",
+    "secure", "account", "bank", "confirm", "password",
+    "wallet", "payment", "invoice", "reset", "unlock"
+]
+
+SUSPICIOUS_TLDS = {
+    "zip", "mov", "click", "top", "xyz", "work",
+    "gq", "tk", "ml", "ga", "cf"
+}
+
+KNOWN_BRANDS = [
+    "google", "paypal", "amazon", "microsoft", "apple",
+    "facebook", "instagram", "netflix", "linkedin",
+    "whatsapp", "adobe", "sbi", "hdfc", "icici"
+]
+
+CHAR_MAP = str.maketrans({
+    "1": "l", "0": "o", "3": "e",
+    "5": "s", "7": "t", "8": "b"
+})
 
 
-# =========================================================
-# LOAD RANDOM FOREST MODEL
-# =========================================================
+def load_model():
+    if joblib is None or not Path(MODEL_FILE).exists():
+        return None
+    try:
+        return joblib.load(MODEL_FILE)
+    except Exception:
+        return None
 
-model = joblib.load("phishguard_model.pkl")
 
+model = load_model()
 
-# =========================================================
-# DATABASE SETUP
-# =========================================================
 
 def create_database():
-
-    connection = sqlite3.connect("phishguard.db")
-    cursor = connection.cursor()
-
-    cursor.execute("""
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS scan_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             url TEXT,
@@ -35,1158 +78,929 @@ def create_database():
             scan_time TEXT
         )
     """)
-
-    connection.commit()
-    connection.close()
-
-
-create_database()
+    conn.commit()
+    conn.close()
 
 
-# =========================================================
-# SAVE SCAN HISTORY
-# =========================================================
-
-def save_scan(
-    url,
-    domain,
-    risk_score,
-    result,
-    impersonation,
-    similarity
-):
-
-    connection = sqlite3.connect("phishguard.db")
-    cursor = connection.cursor()
-
-    cursor.execute("""
+def save_scan(url, domain, risk_score, result, impersonation, similarity):
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("""
         INSERT INTO scan_history
         (url, domain, risk_score, result,
          impersonation, similarity, scan_time)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
-        url,
-        domain,
-        risk_score,
-        result,
-        impersonation,
-        similarity,
+        url, domain, risk_score, result,
+        impersonation, similarity,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ))
+    conn.commit()
+    conn.close()
 
-    connection.commit()
-    connection.close()
+
+def normalize_url(raw):
+    """Validate URL syntax without contacting the website."""
+    value = raw.strip()
+
+    if not value:
+        return None, None, ["No URL was entered."]
+
+    if any(ch.isspace() for ch in value):
+        return None, None, ["URL contains spaces."]
+
+    # Allows both https://example.com and bare domains.
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", value):
+        value = "https://" + value
+
+    try:
+        parsed = urlparse(value)
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname
+        parsed.port  # Force validation of a malformed port.
+    except ValueError:
+        return None, None, ["Invalid URL syntax or port."]
+
+    errors = []
+
+    if scheme not in {"http", "https"}:
+        errors.append("Only HTTP and HTTPS URLs are supported.")
+
+    if not hostname:
+        errors.append("A valid domain or host is required.")
+
+    if hostname:
+        try:
+            ascii_host = hostname.encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            errors.append("Domain contains invalid international characters.")
+            ascii_host = hostname.lower()
+
+        if len(ascii_host) > 253:
+            errors.append("Domain name is too long.")
+        if ".." in ascii_host:
+            errors.append("Domain contains consecutive dots.")
+
+    if errors:
+        return None, None, errors
+
+    return value, parsed, []
 
 
-# =========================================================
-# DOMAIN IMPERSONATION DETECTION
-# =========================================================
+def host_parts(hostname):
+    return [x for x in hostname.lower().rstrip(".").split(".") if x]
 
-def check_impersonation(domain):
 
-    known_brands = [
-        "google",
-        "paypal",
-        "amazon",
-        "microsoft",
-        "apple",
-        "facebook",
-        "instagram"
-    ]
+def get_base_domain(hostname):
+    labels = host_parts(hostname)
+    if len(labels) >= 2:
+        return ".".join(labels[-2:])
+    return hostname.lower().rstrip(".")
 
-    # Remove port number
-    host = domain.lower().split(":")[0]
 
-    # Split domain and ignore www
-    labels = [
-        part
-        for part in host.split(".")
-        if part and part != "www"
-    ]
+def shannon_entropy(text):
+    if not text:
+        return 0.0
 
-    best_match = None
-    best_similarity = 0
-    impersonation_detected = False
+    counts = {}
+    for char in text:
+        counts[char] = counts.get(char, 0) + 1
 
-    for label in labels:
-
-        # Normalize common character substitutions
-        normalized_label = label.replace("1", "l")
-        normalized_label = normalized_label.replace("0", "o")
-        normalized_label = normalized_label.replace("3", "e")
-        normalized_label = normalized_label.replace("5", "s")
-
-        for brand in known_brands:
-
-            similarity = SequenceMatcher(
-                None,
-                normalized_label,
-                brand
-            ).ratio()
-
-            # Example:
-            # paypa1 -> paypal
-            if normalized_label == brand and label != brand:
-                similarity = 1.0
-
-            # Brand written as a prefix
-            if normalized_label.startswith(brand) and label != brand:
-                similarity = max(similarity, 0.90)
-
-            if similarity > best_similarity:
-
-                best_similarity = similarity
-                best_match = brand
-
-                if label != brand and similarity >= 0.75:
-                    impersonation_detected = True
-
-    return (
-        impersonation_detected,
-        best_match,
-        round(best_similarity * 100)
+    n = len(text)
+    return -sum(
+        (count / n) * math.log2(count / n)
+        for count in counts.values()
     )
 
 
+def extract_features(full_url, parsed):
+    host = parsed.hostname or ""
+    lower = full_url.lower()
+    labels = host_parts(host)
+    tld = labels[-1] if labels else ""
+
+    found_keywords = sorted({
+        word for word in SUSPICIOUS_KEYWORDS
+        if word in lower
+    })
+
+    try:
+        ipaddress.ip_address(host)
+        is_ip_host = 1
+    except ValueError:
+        is_ip_host = 0
+
+    digit_count = sum(ch.isdigit() for ch in host)
+
+    return {
+        # Existing Random Forest features
+        "url_length": len(full_url),
+        "has_https": int(parsed.scheme.lower() == "https"),
+        "num_dots": full_url.count("."),
+        "num_special_chars": sum(
+            full_url.count(c) for c in ["@", "-", "_"]
+        ),
+        "has_suspicious_keyword": int(bool(found_keywords)),
+
+        # Additional evidence features
+        "hostname_length": len(host),
+        "subdomain_count": max(0, len(labels) - 2),
+        "hyphen_count": host.count("-"),
+        "digit_count": digit_count,
+        "digit_ratio": round(
+            digit_count / max(1, len(host)), 3
+        ),
+        "has_ip_host": is_ip_host,
+        "has_at_symbol": int("@" in parsed.netloc),
+        "has_punycode": int(
+            any(label.startswith("xn--") for label in labels)
+        ),
+        "suspicious_tld": int(tld in SUSPICIOUS_TLDS),
+        "path_length": len(parsed.path or ""),
+        "query_length": len(parsed.query or ""),
+        "hostname_entropy": round(
+            shannon_entropy(host), 3
+        ),
+        "found_keywords": found_keywords,
+        "base_domain": get_base_domain(host),
+    }
+
+
+def normalized_token(text):
+    return text.lower().translate(CHAR_MAP)
+
+
+def brand_analysis(hostname):
+    labels = host_parts(hostname)
+    best_brand = None
+    best_score = 0.0
+    best_label = None
+
+    for label in labels:
+        if len(label) < 3:
+            continue
+
+        normalized = normalized_token(label)
+
+        for brand in KNOWN_BRANDS:
+            score = SequenceMatcher(
+                None, normalized, brand
+            ).ratio()
+
+            if normalized == brand and label != brand:
+                score = 1.0
+
+            if normalized.startswith(brand) and label != brand:
+                score = max(score, 0.90)
+
+            if score > best_score:
+                best_score = score
+                best_brand = brand
+                best_label = label
+
+    impersonation = (
+        best_brand is not None
+        and best_label != best_brand
+        and best_score >= 0.75
+    )
+
+    reasons = []
+    if impersonation:
+        reasons.append(
+            f"Domain label '{best_label}' resembles "
+            f"'{best_brand}' ({round(best_score * 100)}% similarity)."
+        )
+
+    return (
+        impersonation,
+        best_brand,
+        round(best_score * 100),
+        reasons
+    )
+
+
+def expected_domain_analysis(hostname, expected):
+    """
+    Optional comparison used when an examiner gives a known
+    organization/domain such as hitech9zero.examly.io.
+    """
+    if not expected.strip():
+        return False, 0, []
+
+    expected_value = expected.strip().lower()
+
+    if "://" in expected_value:
+        try:
+            expected_value = (
+                urlparse(expected_value).hostname
+                or expected_value
+            )
+        except Exception:
+            pass
+
+    expected_value = expected_value.rstrip(".")
+    actual = hostname.lower().rstrip(".")
+
+    if (
+        actual == expected_value
+        or actual.endswith("." + expected_value)
+    ):
+        return False, 100, [
+            f"Host matches the supplied expected domain "
+            f"'{expected_value}'."
+        ]
+
+    actual_base = get_base_domain(actual)
+    expected_base = get_base_domain(expected_value)
+
+    full_score = round(
+        SequenceMatcher(
+            None, actual, expected_value
+        ).ratio() * 100
+    )
+
+    base_score = round(
+        SequenceMatcher(
+            None, actual_base, expected_base
+        ).ratio() * 100
+    )
+
+    score = max(full_score, base_score)
+    suspicious = score >= 75
+
+    reasons = []
+    if suspicious:
+        reasons.append(
+            f"Host is similar to the supplied expected domain "
+            f"('{expected_value}') but is not an exact match."
+        )
+
+    return suspicious, score, reasons
+
+
+def model_prediction(features):
+    if model is None:
+        return None, None
+
+    row = pd.DataFrame([{
+        name: features[name]
+        for name in MODEL_FEATURES
+    }])
+
+    try:
+        prediction = int(model.predict(row)[0])
+
+        probability = None
+        if hasattr(model, "predict_proba"):
+            probability = float(
+                model.predict_proba(row)[0][1]
+            )
+
+        return prediction, probability
+
+    except Exception:
+        return None, None
+
+
+def reachability_check(parsed):
+    """
+    Checks public DNS and website reachability.
+    This does NOT decide whether a website is safe.
+    Private/reserved hosts are not contacted.
+    """
+    host = parsed.hostname
+
+    if not host:
+        return {
+            "status": "Not checked",
+            "http_status": None,
+            "final_url": None,
+            "message": "No hostname."
+        }
+
+    try:
+        addresses = socket.getaddrinfo(
+            host,
+            parsed.port or (
+                443 if parsed.scheme == "https"
+                else 80
+            ),
+            type=socket.SOCK_STREAM
+        )
+
+        unique_ips = sorted({
+            item[4][0]
+            for item in addresses
+        })
+
+        public_ips = []
+
+        for ip_text in unique_ips:
+            try:
+                ip_obj = ipaddress.ip_address(ip_text)
+
+                if not (
+                    ip_obj.is_private
+                    or ip_obj.is_loopback
+                    or ip_obj.is_reserved
+                    or ip_obj.is_link_local
+                    or ip_obj.is_multicast
+                ):
+                    public_ips.append(ip_text)
+
+            except ValueError:
+                pass
+
+        if not public_ips:
+            return {
+                "status": "Not contacted",
+                "http_status": None,
+                "final_url": None,
+                "message": (
+                    "Host resolved only to private/reserved addresses."
+                )
+            }
+
+        import urllib.request
+        import urllib.error
+
+        request = urllib.request.Request(
+            parsed.geturl(),
+            headers={
+                "User-Agent": "PhishGuard-Demo/1.0"
+            },
+            method="GET"
+        )
+
+        try:
+            with urllib.request.urlopen(
+                request, timeout=8
+            ) as response:
+
+                final_url = response.geturl()
+                status = getattr(
+                    response, "status", None
+                )
+
+                # Read only a small prefix.
+                response.read(4096)
+
+                return {
+                    "status": "Reachable",
+                    "http_status": status,
+                    "final_url": final_url,
+                    "message": (
+                        f"Server responded with HTTP {status}."
+                    )
+                }
+
+        except urllib.error.HTTPError as exc:
+            return {
+                "status": "Reachable",
+                "http_status": exc.code,
+                "final_url": parsed.geturl(),
+                "message": (
+                    f"Server responded with HTTP {exc.code}."
+                )
+            }
+
+        except urllib.error.URLError as exc:
+            return {
+                "status": "Unreachable",
+                "http_status": None,
+                "final_url": None,
+                "message": str(exc.reason)
+            }
+
+        except (TimeoutError, socket.timeout):
+            return {
+                "status": "Timeout",
+                "http_status": None,
+                "final_url": None,
+                "message": "Connection timed out."
+            }
+
+        except ssl.SSLError:
+            return {
+                "status": "TLS/SSL error",
+                "http_status": None,
+                "final_url": None,
+                "message": (
+                    "HTTPS certificate/TLS verification failed."
+                )
+            }
+
+    except socket.gaierror:
+        return {
+            "status": "DNS failed",
+            "http_status": None,
+            "final_url": None,
+            "message": (
+                "Domain name could not be resolved."
+            )
+        }
+
+    except Exception as exc:
+        return {
+            "status": "Not checked",
+            "http_status": None,
+            "final_url": None,
+            "message": type(exc).__name__
+        }
+
+
+def build_assessment(
+    features,
+    ml_prediction,
+    brand_impersonation,
+    expected_impersonation,
+    reachability
+):
+    points = 0
+    reasons = []
+
+    # Structural evidence
+    if features["has_at_symbol"]:
+        points += 18
+        reasons.append(
+            "The URL contains '@', which can hide the real host."
+        )
+
+    if features["has_ip_host"]:
+        points += 12
+        reasons.append(
+            "The host is an IP address instead of a domain name."
+        )
+
+    if features["has_punycode"]:
+        points += 15
+        reasons.append(
+            "The domain contains punycode/IDN encoding."
+        )
+
+    if features["suspicious_tld"]:
+        points += 8
+        reasons.append(
+            "The top-level domain is in the project's watchlist."
+        )
+
+    if features["has_suspicious_keyword"]:
+        points += min(
+            15,
+            5 * len(features["found_keywords"])
+        )
+        reasons.append(
+            "Suspicious URL terms detected: "
+            + ", ".join(features["found_keywords"])
+        )
+
+    if features["subdomain_count"] >= 3:
+        points += 10
+        reasons.append(
+            "The domain contains multiple subdomain levels."
+        )
+
+    if features["digit_ratio"] >= 0.30:
+        points += 8
+        reasons.append(
+            "The hostname contains a high digit ratio."
+        )
+
+    if features["hyphen_count"] >= 2:
+        points += 6
+        reasons.append(
+            "The hostname contains multiple hyphens."
+        )
+
+    if features["hostname_entropy"] >= 4.0:
+        points += 6
+        reasons.append(
+            "The hostname has relatively high character entropy."
+        )
+
+    # Identity evidence
+    if brand_impersonation:
+        points += 30
+        reasons.append(
+            "Possible known-brand impersonation was detected."
+        )
+
+    if expected_impersonation:
+        points += 30
+        reasons.append(
+            "The supplied expected domain does not match the host."
+        )
+
+    # ML evidence
+    if ml_prediction == 1:
+        points += 20
+        reasons.append(
+            "Random Forest classified the URL as phishing-like."
+        )
+    elif ml_prediction == 0:
+        reasons.append(
+            "Random Forest classified the URL as legitimate-like."
+        )
+
+    # Reachability is deliberately NOT treated as legitimacy.
+    if reachability["status"] == "DNS failed":
+        reasons.append(
+            "The domain could not be resolved by DNS."
+        )
+    elif reachability["status"] == "Reachable":
+        reasons.append(
+            "The website responded to a connectivity check."
+        )
+
+    score = max(0, min(100, points))
+
+    if score >= 60:
+        label = "🚨 Suspicious / Likely Phishing"
+    elif score >= 30:
+        label = "🟡 Suspicious / Needs Verification"
+    else:
+        label = "🟢 No Strong Phishing Indicators"
+
+    return score, label, reasons
+
+
 # =========================================================
-# PAGE CONFIGURATION
+# STREAMLIT UI
 # =========================================================
 
 st.set_page_config(
     page_title="PhishGuard",
     page_icon="🛡️",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+    layout="wide"
 )
 
-
-# =========================================================
-# CUSTOM CSS
-# =========================================================
-
-st.markdown("""
-<style>
-
-.stApp {
-    background:
-        radial-gradient(
-            circle at 10% 10%,
-            rgba(99,102,241,0.18),
-            transparent 28%
-        ),
-        radial-gradient(
-            circle at 90% 20%,
-            rgba(168,85,247,0.16),
-            transparent 30%
-        ),
-        radial-gradient(
-            circle at 50% 100%,
-            rgba(14,165,233,0.12),
-            transparent 30%
-        ),
-        linear-gradient(
-            135deg,
-            #f8faff 0%,
-            #eef2ff 50%,
-            #f0f9ff 100%
-        );
-}
-
-
-/* Main container */
-
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 3rem;
-}
-
-
-/* Main headings */
-
-h1 {
-    text-align: center !important;
-    font-size: 3rem !important;
-    font-weight: 900 !important;
-    color: #312e81 !important;
-}
-
-h2 {
-    color: #3730a3 !important;
-    font-weight: 800 !important;
-}
-
-h3 {
-    color: #4338ca !important;
-    font-weight: 800 !important;
-}
-
-
-/* Hero */
-
-.hero-card {
-    background:
-        linear-gradient(
-            135deg,
-            #4f46e5,
-            #7c3aed
-        );
-
-    padding: 30px;
-
-    border-radius: 24px;
-
-    color: white;
-
-    margin: 10px 0 25px 0;
-
-    box-shadow:
-        0 15px 35px rgba(79,70,229,0.30);
-
-    border: 1px solid rgba(255,255,255,0.30);
-}
-
-.hero-card h2 {
-    color: white !important;
-    font-size: 2.2rem !important;
-    margin-bottom: 10px;
-}
-
-.hero-card p {
-    color: #eef2ff;
-    font-size: 1.05rem;
-    margin-bottom: 0;
-}
-
-
-/* Subtitle */
-
-.subtitle {
-    text-align: center;
-    font-size: 1.1rem;
-    color: #475569;
-    margin: 10px 0 25px 0;
-}
-
-
-/* Scanner */
-
-.scanner-card {
-    background: rgba(255,255,255,0.95);
-
-    border: 1px solid #c7d2fe;
-
-    border-radius: 20px;
-
-    padding: 24px;
-
-    margin-bottom: 15px;
-
-    box-shadow:
-        0 10px 30px rgba(30,41,59,0.08);
-}
-
-.scanner-card h3 {
-    margin-top: 0;
-}
-
-.scanner-card p {
-    color: #64748b;
-}
-
-
-/* URL input */
-
-.stTextInput input {
-
-    border: 2px solid #818cf8 !important;
-
-    border-radius: 13px !important;
-
-    background: white !important;
-
-    padding: 13px !important;
-
-    font-size: 1rem !important;
-
-    box-shadow:
-        0 4px 12px rgba(79,70,229,0.08);
-}
-
-.stTextInput input:focus {
-
-    border-color: #4f46e5 !important;
-
-    box-shadow:
-        0 0 0 3px rgba(99,102,241,0.15) !important;
-}
-
-
-/* Button */
-
-.stButton > button {
-
-    background:
-        linear-gradient(
-            90deg,
-            #4f46e5,
-            #7c3aed
-        ) !important;
-
-    color: white !important;
-
-    border: none !important;
-
-    border-radius: 13px !important;
-
-    padding: 0.75rem 1rem !important;
-
-    font-size: 1.05rem !important;
-
-    font-weight: 800 !important;
-
-    box-shadow:
-        0 8px 18px rgba(79,70,229,0.28);
-
-    transition: all 0.2s ease;
-}
-
-.stButton > button:hover {
-
-    transform: translateY(-2px);
-
-    box-shadow:
-        0 12px 25px rgba(79,70,229,0.35);
-}
-
-
-/* Checkbox */
-
-[data-testid="stCheckbox"] {
-
-    background: rgba(255,255,255,0.80);
-
-    padding: 8px 14px;
-
-    border-radius: 12px;
-
-    border: 1px solid #c7d2fe;
-}
-
-
-/* Metrics */
-
-[data-testid="stMetric"] {
-
-    background: rgba(255,255,255,0.95);
-
-    padding: 20px;
-
-    border-radius: 18px;
-
-    border: 1px solid #c7d2fe;
-
-    box-shadow:
-        0 8px 20px rgba(15,23,42,0.08);
-}
-
-[data-testid="stMetricLabel"] {
-
-    color: #6366f1 !important;
-
-    font-weight: 700 !important;
-}
-
-[data-testid="stMetricValue"] {
-
-    color: #312e81 !important;
-
-    font-weight: 900 !important;
-}
-
-
-/* Alerts */
-
-[data-testid="stAlert"] {
-    border-radius: 14px !important;
-}
-
-
-/* Code */
-
-code {
-    border-radius: 10px !important;
-}
-
-
-/* Result cards */
-
-.result-danger {
-
-    background:
-        linear-gradient(
-            135deg,
-            #fff1f2,
-            #ffe4e6
-        );
-
-    border-left: 7px solid #ef4444;
-
-    border-radius: 16px;
-
-    padding: 20px;
-
-    margin: 10px 0;
-
-    box-shadow:
-        0 8px 20px rgba(239,68,68,0.12);
-}
-
-.result-safe {
-
-    background:
-        linear-gradient(
-            135deg,
-            #f0fdf4,
-            #dcfce7
-        );
-
-    border-left: 7px solid #22c55e;
-
-    border-radius: 16px;
-
-    padding: 20px;
-
-    margin: 10px 0;
-
-    box-shadow:
-        0 8px 20px rgba(34,197,94,0.12);
-}
-
-.result-warning {
-
-    background:
-        linear-gradient(
-            135deg,
-            #fffbeb,
-            #fef3c7
-        );
-
-    border-left: 7px solid #f59e0b;
-
-    border-radius: 16px;
-
-    padding: 20px;
-
-    margin: 10px 0;
-
-    box-shadow:
-        0 8px 20px rgba(245,158,11,0.12);
-}
-
-
-.result-title {
-
-    font-size: 1.45rem;
-
-    font-weight: 850;
-
-    margin-bottom: 5px;
-}
-
-.result-text {
-
-    color: #475569;
-
-    font-size: 0.95rem;
-}
-
-
-/* Evidence cards */
-
-.info-card {
-
-    background: rgba(255,255,255,0.95);
-
-    border-radius: 18px;
-
-    padding: 20px;
-
-    border: 1px solid #dbeafe;
-
-    box-shadow:
-        0 8px 22px rgba(15,23,42,0.07);
-
-    min-height: 145px;
-
-    margin-bottom: 15px;
-}
-
-.info-card-purple {
-    border-top: 5px solid #8b5cf6;
-}
-
-.info-card-orange {
-    border-top: 5px solid #f97316;
-}
-
-.info-card-green {
-    border-top: 5px solid #22c55e;
-}
-
-.info-card-blue {
-    border-top: 5px solid #3b82f6;
-}
-
-.card-title {
-
-    font-size: 1.1rem;
-
-    font-weight: 800;
-
-    color: #312e81;
-
-    margin-bottom: 8px;
-}
-
-.card-text {
-
-    color: #64748b;
-
-    line-height: 1.5;
-}
-
-
-/* Feature cards */
-
-.feature-card {
-
-    background: rgba(255,255,255,0.95);
-
-    border-radius: 18px;
-
-    padding: 22px;
-
-    min-height: 190px;
-
-    border: 1px solid #e0e7ff;
-
-    box-shadow:
-        0 8px 22px rgba(15,23,42,0.07);
-
-    transition: transform 0.2s ease;
-}
-
-.feature-card:hover {
-    transform: translateY(-4px);
-}
-
-.feature-icon {
-    font-size: 2.3rem;
-    margin-bottom: 8px;
-}
-
-.feature-title {
-
-    font-size: 1.15rem;
-
-    font-weight: 850;
-
-    color: #3730a3;
-
-    margin-bottom: 8px;
-}
-
-.feature-text {
-
-    color: #64748b;
-
-    line-height: 1.5;
-}
-
-
-/* Dataframe */
-
-[data-testid="stDataFrame"] {
-
-    border-radius: 16px;
-
-    overflow: hidden;
-
-    box-shadow:
-        0 8px 20px rgba(15,23,42,0.08);
-}
-
-
-/* Footer */
-
-.footer {
-
-    text-align: center;
-
-    color: #64748b;
-
-    padding: 20px;
-
-    font-size: 0.9rem;
-}
-
-.footer b {
-    color: #4338ca;
-    font-size: 1.05rem;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-
-# =========================================================
-# HERO HEADER
-# =========================================================
-
-st.html("""
-<div class="hero-card">
-    <h2>🛡️ PhishGuard</h2>
-    <p>
-        AI-powered phishing domain detection,
-        domain impersonation analysis and
-        risk assessment.
-    </p>
-</div>
-""")
-
-
-st.html("""
-<div class="subtitle">
-    🔐 Intelligent URL Security Analysis using Random Forest
-</div>
-""")
-
-
-# =========================================================
-# SCANNER CARD
-# =========================================================
-
-st.html("""
-<div class="scanner-card">
-    <h3>🔍 Scan a Website</h3>
-    <p>
-        Enter a website URL below to analyze its
-        security characteristics.
-    </p>
-</div>
-""")
-
-
-# =========================================================
-# URL INPUT
-# =========================================================
-
-url = st.text_input(
-    "Website URL",
-    placeholder="Example: https://example.com",
-    label_visibility="collapsed"
+create_database()
+
+st.title("🛡️ PhishGuard")
+st.subheader(
+    "AI-Based Intelligent Phishing Domain Detection "
+    "& Risk Assessment"
 )
 
-
-verification_limited = st.checkbox(
-    "🔐 This URL requires login or restricted access"
+st.write(
+    "PhishGuard validates a URL, checks whether the public "
+    "website is reachable, extracts domain/URL evidence, "
+    "uses Random Forest when available, and explains the result."
 )
 
+with st.expander("⚙️ Demo settings", expanded=True):
+    expected_domain = st.text_input(
+        "Optional: expected legitimate domain",
+        placeholder=(
+            "Example: examly.io or "
+            "hitech9zero.examly.io"
+        ),
+        help=(
+            "Use this when the examiner gives a known "
+            "organization/domain to verify."
+        )
+    )
 
-# =========================================================
-# ANALYZE BUTTON
-# =========================================================
+url_input = st.text_input(
+    "🔗 Enter a website URL or domain",
+    placeholder=(
+        "https://example.com  or  "
+        "hitech9zero.examly.io"
+    )
+)
 
-if st.button(
+analyze = st.button(
     "🔎 Analyze URL",
     width="stretch"
-):
+)
 
-    if not url:
+if analyze:
 
-        st.warning("⚠️ Please enter a URL.")
+    normalized_url, parsed, errors = normalize_url(
+        url_input
+    )
+
+    if errors:
+        st.error("❌ Invalid URL")
+        for error in errors:
+            st.write("• " + error)
+
+        st.info(
+            "Valid examples: "
+            "https://example.com  or  "
+            "hitech9zero.examly.io"
+        )
+
+        st.stop()
+
+    host = parsed.hostname.lower().rstrip(".")
+
+    # 1. Extract URL/domain features
+    features = extract_features(
+        normalized_url,
+        parsed
+    )
+
+    # 2. Machine-learning evidence
+    ml_prediction, ml_probability = model_prediction(
+        features
+    )
+
+    # 3. Known-brand impersonation evidence
+    (
+        brand_impersonation,
+        matched_brand,
+        brand_similarity,
+        brand_reasons
+    ) = brand_analysis(host)
+
+    # 4. Optional examiner-provided expected-domain comparison
+    (
+        expected_impersonation,
+        expected_similarity,
+        expected_reasons
+    ) = expected_domain_analysis(
+        host,
+        expected_domain
+    )
+
+    # 5. Actual DNS/website reachability
+    reachability = reachability_check(parsed)
+
+    # 6. Evidence fusion
+    risk_score, result_label, reasons = build_assessment(
+        features,
+        ml_prediction,
+        brand_impersonation,
+        expected_impersonation,
+        reachability
+    )
+
+    reasons = (
+        brand_reasons
+        + expected_reasons
+        + reasons
+    )
+
+    reasons = list(dict.fromkeys(reasons))
+
+    if not reasons:
+        reasons = [
+            "No strong suspicious indicators were detected "
+            "by the current analysis rules."
+        ]
+
+    # Save scan
+    if brand_impersonation:
+        impersonation_text = (
+            f"Possible {matched_brand} impersonation"
+        )
+    elif expected_impersonation:
+        impersonation_text = (
+            "Possible expected-domain mismatch"
+        )
+    else:
+        impersonation_text = "None detected"
+
+    similarity_to_save = max(
+        brand_similarity,
+        expected_similarity
+    )
+
+    save_scan(
+        normalized_url,
+        host,
+        risk_score,
+        result_label,
+        impersonation_text,
+        similarity_to_save
+    )
+
+    # =====================================================
+    # RESULT
+    # =====================================================
+
+    st.divider()
+    st.header("📊 Analysis Result")
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric(
+        "Risk Score",
+        f"{risk_score}/100"
+    )
+
+    c2.metric(
+        "Domain",
+        host
+    )
+
+    c3.metric(
+        "Website Status",
+        reachability["status"]
+    )
+
+    c4.metric(
+        "HTTPS",
+        "Yes" if features["has_https"]
+        else "No"
+    )
+
+    if risk_score >= 60:
+        st.error(result_label)
+    elif risk_score >= 30:
+        st.warning(result_label)
+    else:
+        st.success(result_label)
+
+    # =====================================================
+    # EXPLANATION
+    # =====================================================
+
+    st.subheader(
+        "🧠 Why did PhishGuard give this result?"
+    )
+
+    for reason in reasons:
+        st.write("• " + reason)
+
+    # =====================================================
+    # WEBSITE STATUS
+    # =====================================================
+
+    st.subheader("🌐 URL / Website Status")
+
+    st.write(
+        f"**Normalized URL:** `{normalized_url}`"
+    )
+
+    st.write(
+        f"**Domain:** `{host}`"
+    )
+
+    st.write(
+        f"**DNS / HTTP status:** "
+        f"**{reachability['status']}**"
+    )
+
+    if reachability["http_status"] is not None:
+        st.write(
+            f"**HTTP status code:** "
+            f"`{reachability['http_status']}`"
+        )
+
+    if reachability["final_url"]:
+        st.write(
+            f"**Final URL:** "
+            f"`{reachability['final_url']}`"
+        )
+
+    st.caption(
+        "Important: a reachable website is not automatically "
+        "legitimate, and an unreachable website is not "
+        "automatically phishing."
+    )
+
+    # =====================================================
+    # DOMAIN IDENTITY
+    # =====================================================
+
+    st.subheader(
+        "🎭 Domain Identity / Impersonation"
+    )
+
+    if brand_impersonation:
+        st.error(
+            f"Possible {matched_brand} impersonation — "
+            f"{brand_similarity}% similarity"
+        )
+
+    elif matched_brand:
+        st.write(
+            f"Closest known brand: **{matched_brand}** "
+            f"({brand_similarity}% similarity). "
+            "The configured impersonation threshold "
+            "was not reached."
+        )
+
+    else:
+        st.write(
+            "No close match was found in the project's "
+            "known-brand list."
+        )
+
+    if expected_domain.strip():
+
+        if expected_impersonation:
+            st.warning(
+                f"Expected-domain comparison: possible "
+                f"mismatch ({expected_similarity}% similarity)."
+            )
+
+        else:
+            st.success(
+                "Expected-domain comparison: host matches "
+                "or does not strongly resemble a different domain."
+            )
+
+    # =====================================================
+    # FEATURES
+    # =====================================================
+
+    st.subheader("🔬 Extracted Features")
+
+    feature_display = {
+        "URL Length": features["url_length"],
+        "HTTPS": (
+            "Yes" if features["has_https"]
+            else "No"
+        ),
+        "Number of Dots": features["num_dots"],
+        "Special Characters (@ - _)":
+            features["num_special_chars"],
+        "Suspicious Keywords":
+            (
+                ", ".join(features["found_keywords"])
+                if features["found_keywords"]
+                else "None"
+            ),
+        "Hostname Length":
+            features["hostname_length"],
+        "Subdomain Count":
+            features["subdomain_count"],
+        "Digit Ratio":
+            features["digit_ratio"],
+        "IP Host":
+            (
+                "Yes" if features["has_ip_host"]
+                else "No"
+            ),
+        "@ Symbol":
+            (
+                "Yes" if features["has_at_symbol"]
+                else "No"
+            ),
+        "Punycode":
+            (
+                "Yes" if features["has_punycode"]
+                else "No"
+            ),
+        "Suspicious TLD":
+            (
+                "Yes" if features["suspicious_tld"]
+                else "No"
+            ),
+        "Path Length":
+            features["path_length"],
+        "Query Length":
+            features["query_length"],
+        "Hostname Entropy":
+            features["hostname_entropy"],
+    }
+
+    st.dataframe(
+        pd.DataFrame(
+            feature_display.items(),
+            columns=["Feature", "Value"]
+        ),
+        width="stretch",
+        hide_index=True
+    )
+
+    # =====================================================
+    # RANDOM FOREST
+    # =====================================================
+
+    st.subheader("🤖 Random Forest")
+
+    if ml_prediction is None:
+
+        st.warning(
+            "Random Forest model was not available for "
+            "this scan. The URL/domain evidence engine "
+            "still performed the analysis."
+        )
 
     else:
 
-        # =================================================
-        # ADD HTTPS
-        # =================================================
-
-        if not url.startswith(
-            ("http://", "https://")
-        ):
-
-            url = "https://" + url
-
-
-        # =================================================
-        # PARSE URL
-        # =================================================
-
-        parsed = urlparse(url)
-
-        domain = parsed.netloc
-
-
-        # =================================================
-        # FEATURE EXTRACTION
-        # =================================================
-
-        url_length = len(url)
-
-        has_https = int(
-            url.startswith("https://")
-        )
-
-        num_dots = url.count(".")
-
-
-        num_special_chars = sum(
-            url.count(char)
-            for char in ["@", "-", "_"]
-        )
-
-
-        suspicious_keywords = [
-            "login",
-            "verify",
-            "update",
-            "secure",
-            "account",
-            "bank",
-            "confirm",
-            "password"
-        ]
-
-
-        has_suspicious_keyword = int(
-            any(
-                word in url.lower()
-                for word in suspicious_keywords
+        st.write(
+            "**Model prediction:** "
+            + (
+                "Phishing-like"
+                if ml_prediction == 1
+                else "Legitimate-like"
             )
         )
 
+        if ml_probability is not None:
+            st.write(
+                "**Model phishing probability:** "
+                f"{ml_probability:.2%}"
+            )
 
-        found_keywords = [
-            word
-            for word in suspicious_keywords
-            if word in url.lower()
-        ]
-
-
-        # =================================================
-        # RANDOM FOREST PREDICTION
-        # =================================================
-
-        features = pd.DataFrame(
-            [[
-                url_length,
-                has_https,
-                num_dots,
-                num_special_chars,
-                has_suspicious_keyword
-            ]],
-            columns=[
-                "url_length",
-                "has_https",
-                "num_dots",
-                "num_special_chars",
-                "has_suspicious_keyword"
-            ]
+        st.caption(
+            "Random Forest is treated as one evidence "
+            "source, not the sole decision-maker."
         )
-
-
-        prediction = model.predict(features)[0]
-
-
-        # =================================================
-        # IMPERSONATION ANALYSIS
-        # =================================================
-
-        (
-            is_impersonation,
-            matched_brand,
-            similarity
-        ) = check_impersonation(domain)
-
-
-        # =================================================
-        # FINAL RESULT
-        # =================================================
-
-        if verification_limited:
-
-            result = "🟡 Unverified"
-
-        elif prediction == 1 or is_impersonation:
-
-            result = "🚨 Likely Phishing"
-
-        else:
-
-            result = "✅ Likely Legitimate"
-
-
-        # =================================================
-        # RISK SCORE
-        # =================================================
-
-        if verification_limited:
-
-            risk_score = 50
-
-        else:
-
-            if prediction == 1:
-
-                risk_score = 75
-
-            else:
-
-                risk_score = 20
-
-
-            if is_impersonation:
-
-                risk_score += 20
-
-
-            risk_score = min(
-                risk_score,
-                100
-            )
-
-
-        # =================================================
-        # IMPERSONATION TEXT
-        # =================================================
-
-        if is_impersonation:
-
-            impersonation_text = (
-                f"Possible {matched_brand} impersonation"
-            )
-
-        else:
-
-            impersonation_text = "None detected"
-
-
-        # =================================================
-        # SAVE TO DATABASE
-        # =================================================
-
-        save_scan(
-            url,
-            domain,
-            risk_score,
-            result,
-            impersonation_text,
-            similarity
-        )
-
-
-        # =================================================
-        # ANALYSIS RESULT
-        # =================================================
-
-        st.divider()
-
-        st.header("📊 Analysis Result")
-
-
-        # =================================================
-        # SCORE CARDS
-        # =================================================
-
-        col1, col2, col3 = st.columns(3)
-
-
-        with col1:
-
-            st.metric(
-                "🛡️ Risk Score",
-                f"{risk_score}/100"
-            )
-
-
-        with col2:
-
-            st.metric(
-                "🎯 Domain Similarity",
-                f"{similarity}%"
-            )
-
-
-        with col3:
-
-            st.metric(
-                "🔗 HTTPS",
-                "Enabled" if has_https else "Disabled"
-            )
-
-
-        # =================================================
-        # FINAL RESULT CARD
-        # =================================================
-
-        if verification_limited:
-
-            st.html("""
-            <div class="result-warning">
-
-                <div class="result-title">
-                    🟡 Unverified
-                </div>
-
-                <div class="result-text">
-                    Verification is limited because this
-                    URL requires login or restricted access.
-                </div>
-
-            </div>
-            """)
-
-
-        elif prediction == 1 or is_impersonation:
-
-            st.html("""
-            <div class="result-danger">
-
-                <div class="result-title">
-                    🚨 Likely Phishing
-                </div>
-
-                <div class="result-text">
-                    The system detected one or more
-                    suspicious indicators.
-                </div>
-
-            </div>
-            """)
-
-
-        else:
-
-            st.html("""
-            <div class="result-safe">
-
-                <div class="result-title">
-                    ✅ Likely Legitimate
-                </div>
-
-                <div class="result-text">
-                    No major phishing indicators were
-                    detected by the current analysis.
-                </div>
-
-            </div>
-            """)
-
-
-        # =================================================
-        # DETECTION EVIDENCE
-        # =================================================
-
-        st.subheader("🔎 Detection Evidence")
-
-
-        evidence1, evidence2 = st.columns(2)
-
-
-        # =================================================
-        # IMPERSONATION CARD
-        # =================================================
-
-        with evidence1:
-
-            if is_impersonation:
-
-                st.html(f"""
-                <div class="info-card info-card-orange">
-
-                    <div class="card-title">
-                        🎭 Brand Impersonation
-                    </div>
-
-                    <div class="card-text">
-                        Possible impersonation of
-                        <b>{matched_brand}</b>.
-                        <br><br>
-                        Similarity:
-                        <b>{similarity}%</b>
-                    </div>
-
-                </div>
-                """)
-
-            else:
-
-                st.html("""
-                <div class="info-card info-card-green">
-
-                    <div class="card-title">
-                        🎭 Brand Impersonation
-                    </div>
-
-                    <div class="card-text">
-                        No obvious known-brand
-                        impersonation detected.
-                    </div>
-
-                </div>
-                """)
-
-
-        # =================================================
-        # RANDOM FOREST CARD
-        # =================================================
-
-        with evidence2:
-
-            ml_result = (
-                "Phishing"
-                if prediction == 1
-                else "Likely Legitimate"
-            )
-
-
-            st.html(f"""
-            <div class="info-card info-card-purple">
-
-                <div class="card-title">
-                    🤖 Random Forest
-                </div>
-
-                <div class="card-text">
-                    Model prediction:
-                    <b>{ml_result}</b>
-                    <br><br>
-                    Five URL-based features were
-                    analyzed by the classifier.
-                </div>
-
-            </div>
-            """)
-
-
-        # =================================================
-        # DOMAIN
-        # =================================================
-
-        st.subheader("🌐 Domain")
-
-        st.code(domain)
-
-
-        # =================================================
-        # VERIFICATION STATUS
-        # =================================================
-
-        st.subheader("🔐 Verification Status")
-
-
-        if verification_limited:
-
-            st.warning(
-                "Verification is limited because the URL "
-                "requires login or restricted access."
-            )
-
-            st.info(
-                "The system does not automatically classify "
-                "an inaccessible or authentication-protected "
-                "URL as phishing."
-            )
-
-        else:
-
-            st.success(
-                "Normal verification mode."
-            )
-
-
-        # =================================================
-        # EXTRACTED FEATURES
-        # =================================================
-
-        st.subheader("🧩 Extracted URL Features")
-
-
-        f1, f2, f3, f4, f5 = st.columns(5)
-
-
-        with f1:
-
-            st.metric(
-                "URL Length",
-                url_length
-            )
-
-
-        with f2:
-
-            st.metric(
-                "HTTPS",
-                "Yes" if has_https else "No"
-            )
-
-
-        with f3:
-
-            st.metric(
-                "Dots",
-                num_dots
-            )
-
-
-        with f4:
-
-            st.metric(
-                "Special Chars",
-                num_special_chars
-            )
-
-
-        with f5:
-
-            st.metric(
-                "Suspicious",
-                "Yes" if has_suspicious_keyword else "No"
-            )
-
-
-        if found_keywords:
-
-            st.info(
-                "🔎 Detected keywords: "
-                + ", ".join(found_keywords)
-            )
-
-
-        # =================================================
-        # MACHINE LEARNING MODEL
-        # =================================================
-
-        st.subheader("🤖 Machine Learning Model")
-
-
-        st.html("""
-        <div class="info-card info-card-blue">
-
-            <div class="card-title">
-                🌲 Random Forest Classifier
-            </div>
-
-            <div class="card-text">
-                PhishGuard uses a Random Forest classifier
-                trained using URL-based features such as
-                URL length, HTTPS usage, number of dots,
-                special characters and suspicious keywords.
-            </div>
-
-        </div>
-        """)
 
 
 # =========================================================
@@ -1194,160 +1008,53 @@ if st.button(
 # =========================================================
 
 st.divider()
-
 st.header("📜 Scan History")
 
+try:
 
-connection = sqlite3.connect("phishguard.db")
+    conn = sqlite3.connect(DB_FILE)
+
+    history = pd.read_sql_query(
+        """
+        SELECT
+            url AS URL,
+            domain AS Domain,
+            risk_score AS "Risk Score",
+            result AS Result,
+            impersonation AS Impersonation,
+            similarity AS "Similarity %",
+            scan_time AS "Scan Time"
+        FROM scan_history
+        ORDER BY id DESC
+        LIMIT 50
+        """,
+        conn
+    )
+
+    conn.close()
+
+    if history.empty:
+        st.info("No scan history yet.")
+
+    else:
+        st.dataframe(
+            history,
+            width="stretch",
+            hide_index=True
+        )
+
+except Exception as exc:
+
+    st.warning(
+        f"Could not load scan history: "
+        f"{type(exc).__name__}"
+    )
 
 
-history = pd.read_sql_query(
-    """
-    SELECT
-        url AS URL,
-        domain AS Domain,
-        risk_score AS "Risk Score",
-        result AS Result,
-        impersonation AS Impersonation,
-        similarity AS "Similarity %",
-        scan_time AS "Scan Time"
-    FROM scan_history
-    ORDER BY id DESC
-    """,
-    connection
+st.divider()
+
+st.caption(
+    "PhishGuard is a student prototype. "
+    "Its result is an assessment, not proof that "
+    "a website is safe or malicious."
 )
-
-
-connection.close()
-
-
-if not history.empty:
-
-    st.dataframe(
-        history,
-        width="stretch",
-        hide_index=True
-    )
-
-else:
-
-    st.info(
-        "📭 No scan history available yet."
-    )
-
-
-# =========================================================
-# WHAT PHISHGUARD ANALYZES
-# =========================================================
-
-st.divider()
-
-st.header("🛡️ What PhishGuard Analyzes")
-
-
-col1, col2, col3 = st.columns(3)
-
-
-# =========================================================
-# RANDOM FOREST FEATURE
-# =========================================================
-
-with col1:
-
-    st.html("""
-    <div class="feature-card">
-
-        <div class="feature-icon">
-            🤖
-        </div>
-
-        <div class="feature-title">
-            Random Forest
-        </div>
-
-        <div class="feature-text">
-            Analyzes URL-based features using
-            a machine-learning classifier.
-        </div>
-
-    </div>
-    """)
-
-
-# =========================================================
-# IMPERSONATION FEATURE
-# =========================================================
-
-with col2:
-
-    st.html("""
-    <div class="feature-card">
-
-        <div class="feature-icon">
-            🎭
-        </div>
-
-        <div class="feature-title">
-            Impersonation Detection
-        </div>
-
-        <div class="feature-text">
-            Identifies possible brand impersonation,
-            character substitutions and suspicious
-            domain similarities.
-        </div>
-
-    </div>
-    """)
-
-
-# =========================================================
-# RISK FEATURE
-# =========================================================
-
-with col3:
-
-    st.html("""
-    <div class="feature-card">
-
-        <div class="feature-icon">
-            📊
-        </div>
-
-        <div class="feature-title">
-            Risk Assessment
-        </div>
-
-        <div class="feature-text">
-            Provides a project-defined 0–100
-            risk score with supporting evidence.
-        </div>
-
-    </div>
-    """)
-
-
-# =========================================================
-# FOOTER
-# =========================================================
-
-st.divider()
-
-
-st.html("""
-<div class="footer">
-
-    🛡️ <b>PhishGuard</b>
-    <br><br>
-
-    AI-Based Intelligent Phishing Domain Detection System
-
-    <br><br>
-
-    <small>
-        Random Forest • Domain Impersonation Analysis •
-        Risk Assessment
-    </small>
-
-</div>
-""")
